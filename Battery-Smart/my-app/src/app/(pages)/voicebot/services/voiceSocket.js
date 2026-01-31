@@ -1,11 +1,12 @@
 /**
  * Voice Socket Service - WebRTC connection to FastRTC backend
- * 
+ *
  * This connects to FastRTC via WebRTC for real-time audio streaming.
  * Connects to FastAPI backend at port 8000 with FastRTC endpoints.
  */
 
-const BACKEND_URL = 'http://localhost:8000';
+const BACKEND_URL = "http://localhost:8000";
+const SOCKET_SERVER_URL = "ws://localhost:4001";
 
 // Generate unique WebRTC ID
 function generateWebRTCId() {
@@ -36,6 +37,9 @@ export class VoiceSocketService {
 
     // Polling interval for session state
     this.statePollingInterval = null;
+
+    // Socket server connection for escalation
+    this.socketServer = null;
   }
 
   /**
@@ -43,14 +47,14 @@ export class VoiceSocketService {
    */
   async connect() {
     if (this.isConnected) {
-      console.log('Already connected');
+      console.log("Already connected");
       return true;
     }
 
     try {
       // Generate unique webrtc_id for this connection
       this.webrtcId = generateWebRTCId();
-      console.log('🔌 WebRTC ID:', this.webrtcId);
+      console.log("🔌 WebRTC ID:", this.webrtcId);
 
       // 1. Get user's microphone
       this.localStream = await navigator.mediaDevices.getUserMedia({
@@ -58,24 +62,24 @@ export class VoiceSocketService {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          sampleRate: 24000
-        }
+          sampleRate: 24000,
+        },
       });
-      console.log('🎤 Microphone access granted');
+      console.log("🎤 Microphone access granted");
 
       // 2. Create RTCPeerConnection
       this.peerConnection = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
 
       // 3. Add local audio track
-      this.localStream.getTracks().forEach(track => {
+      this.localStream.getTracks().forEach((track) => {
         this.peerConnection.addTrack(track, this.localStream);
       });
 
       // 4. Handle incoming audio from bot
       this.peerConnection.ontrack = (event) => {
-        console.log('🔊 Received remote audio track');
+        console.log("🔊 Received remote audio track");
         this.remoteStream = event.streams[0];
 
         // Create audio element for playback if not exists
@@ -96,26 +100,28 @@ export class VoiceSocketService {
 
       // 6. Handle connection state changes
       this.peerConnection.onconnectionstatechange = () => {
-        console.log('Connection state:', this.peerConnection.connectionState);
-        if (this.peerConnection.connectionState === 'connected') {
+        console.log("Connection state:", this.peerConnection.connectionState);
+        if (this.peerConnection.connectionState === "connected") {
           this.isConnected = true;
           if (this.onStateChangeCallback) {
-            this.onStateChangeCallback('connected');
+            this.onStateChangeCallback("connected");
           }
-        } else if (this.peerConnection.connectionState === 'disconnected' ||
-          this.peerConnection.connectionState === 'failed') {
+        } else if (
+          this.peerConnection.connectionState === "disconnected" ||
+          this.peerConnection.connectionState === "failed"
+        ) {
           this.isConnected = false;
           if (this.onStateChangeCallback) {
-            this.onStateChangeCallback('disconnected');
+            this.onStateChangeCallback("disconnected");
           }
         }
       };
 
       // 7. Create data channel for messages (FastRTC uses this)
-      this.dataChannel = this.peerConnection.createDataChannel('data');
+      this.dataChannel = this.peerConnection.createDataChannel("data");
 
       this.dataChannel.onopen = () => {
-        console.log('📡 Data channel opened');
+        console.log("📡 Data channel opened");
       };
 
       this.dataChannel.onmessage = (event) => {
@@ -123,7 +129,7 @@ export class VoiceSocketService {
           const message = JSON.parse(event.data);
           this.handleDataChannelMessage(message);
         } catch (e) {
-          console.log('Data channel message:', event.data);
+          console.log("Data channel message:", event.data);
         }
       };
 
@@ -133,16 +139,22 @@ export class VoiceSocketService {
 
       // Wait for ICE gathering to complete (or timeout)
       await new Promise((resolve) => {
-        if (this.peerConnection.iceGatheringState === 'complete') {
+        if (this.peerConnection.iceGatheringState === "complete") {
           resolve();
         } else {
           const checkState = () => {
-            if (this.peerConnection.iceGatheringState === 'complete') {
-              this.peerConnection.removeEventListener('icegatheringstatechange', checkState);
+            if (this.peerConnection.iceGatheringState === "complete") {
+              this.peerConnection.removeEventListener(
+                "icegatheringstatechange",
+                checkState,
+              );
               resolve();
             }
           };
-          this.peerConnection.addEventListener('icegatheringstatechange', checkState);
+          this.peerConnection.addEventListener(
+            "icegatheringstatechange",
+            checkState,
+          );
           // Timeout after 3 seconds
           setTimeout(resolve, 3000);
         }
@@ -150,13 +162,13 @@ export class VoiceSocketService {
 
       // 9. Send offer to FastRTC backend with webrtc_id
       const response = await fetch(`${BACKEND_URL}/webrtc/offer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sdp: this.peerConnection.localDescription.sdp,
           type: this.peerConnection.localDescription.type,
-          webrtc_id: this.webrtcId
-        })
+          webrtc_id: this.webrtcId,
+        }),
       });
 
       if (!response.ok) {
@@ -167,13 +179,15 @@ export class VoiceSocketService {
       const answer = await response.json();
 
       // Check for FastRTC error response
-      if (answer.status === 'failed') {
-        throw new Error(`FastRTC error: ${answer.meta?.error || 'Unknown error'}`);
+      if (answer.status === "failed") {
+        throw new Error(
+          `FastRTC error: ${answer.meta?.error || "Unknown error"}`,
+        );
       }
 
       // 10. Set remote description from FastRTC
       await this.peerConnection.setRemoteDescription(
-        new RTCSessionDescription({ sdp: answer.sdp, type: answer.type })
+        new RTCSessionDescription({ sdp: answer.sdp, type: answer.type }),
       );
 
       // 11. Send collected ICE candidates
@@ -183,15 +197,14 @@ export class VoiceSocketService {
 
       this.isConnected = true;
       this.sessionActive = true;
-      console.log('✅ WebRTC connected to FastRTC');
+      console.log("✅ WebRTC connected to FastRTC");
 
       // Start polling session state
       this.startStatePolling();
 
       return true;
-
     } catch (error) {
-      console.error('❌ WebRTC connection failed:', error);
+      console.error("❌ WebRTC connection failed:", error);
       if (this.onErrorCallback) {
         this.onErrorCallback(error);
       }
@@ -205,20 +218,20 @@ export class VoiceSocketService {
   async sendIceCandidate(candidate) {
     try {
       await fetch(`${BACKEND_URL}/webrtc/offer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: 'ice-candidate',
+          type: "ice-candidate",
           candidate: {
             candidate: candidate.candidate,
             sdpMid: candidate.sdpMid,
-            sdpMLineIndex: candidate.sdpMLineIndex
+            sdpMLineIndex: candidate.sdpMLineIndex,
           },
-          webrtc_id: this.webrtcId
-        })
+          webrtc_id: this.webrtcId,
+        }),
       });
     } catch (error) {
-      console.warn('Failed to send ICE candidate:', error);
+      console.warn("Failed to send ICE candidate:", error);
     }
   }
 
@@ -226,43 +239,43 @@ export class VoiceSocketService {
    * Handle messages from FastRTC data channel
    */
   handleDataChannelMessage(message) {
-    console.log('📨 Data channel message:', message);
+    console.log("📨 Data channel message:", message);
 
     switch (message.type) {
-      case 'log':
+      case "log":
         if (this.onLogCallback) {
           this.onLogCallback(message.data);
         }
         // Handle specific log events
-        if (message.data === 'pause_detected') {
+        if (message.data === "pause_detected") {
           if (this.onStateChangeCallback) {
-            this.onStateChangeCallback('processing');
+            this.onStateChangeCallback("processing");
           }
-        } else if (message.data === 'response_starting') {
+        } else if (message.data === "response_starting") {
           if (this.onStateChangeCallback) {
-            this.onStateChangeCallback('speaking');
+            this.onStateChangeCallback("speaking");
           }
-        } else if (message.data === 'started_talking') {
+        } else if (message.data === "started_talking") {
           if (this.onStateChangeCallback) {
-            this.onStateChangeCallback('listening');
+            this.onStateChangeCallback("listening");
           }
         }
         break;
 
-      case 'fetch_output':
+      case "fetch_output":
         // AdditionalOutputs from FastRTC
         this.handleAdditionalOutputs(message.data);
         break;
 
-      case 'error':
-        console.error('FastRTC error:', message.data);
+      case "error":
+        console.error("FastRTC error:", message.data);
         if (this.onErrorCallback) {
           this.onErrorCallback(new Error(message.data));
         }
         break;
 
-      case 'warning':
-        console.warn('FastRTC warning:', message.data);
+      case "warning":
+        console.warn("FastRTC warning:", message.data);
         break;
     }
   }
@@ -271,31 +284,47 @@ export class VoiceSocketService {
    * Handle AdditionalOutputs from FastRTC (transcript, bot response, tool, latency)
    */
   handleAdditionalOutputs(data) {
+    console.log("📨 handleAdditionalOutputs received:", data);
+
     // data is an array: [userText, botResponse, toolData, latency]
     if (Array.isArray(data) && data.length >= 4) {
       const [userText, botResponse, toolData, latency] = data;
 
+      console.log("📝 Parsed - userText:", userText?.substring(0, 50));
+      console.log("🤖 Parsed - botResponse:", botResponse?.substring(0, 50));
+      console.log("🔧 Parsed - toolData:", toolData);
+
       if (userText && this.onTranscriptCallback) {
-        this.onTranscriptCallback(userText.replace(/^🗣️\s*/, ''));
+        this.onTranscriptCallback(userText.replace(/^🗣️\s*/, ""));
       }
 
       if (botResponse && this.onBotResponseCallback) {
-        this.onBotResponseCallback(botResponse.replace(/^🤖\s*/, ''));
+        this.onBotResponseCallback(botResponse.replace(/^🤖\s*/, ""));
       }
 
-      if (toolData && toolData !== 'None' && this.onToolActivationCallback) {
+      if (toolData && toolData !== "None" && this.onToolActivationCallback) {
+        console.log("🔧 Tool data found, attempting to parse...");
         try {
-          const tool = typeof toolData === 'string' ? JSON.parse(toolData) : toolData;
+          const tool =
+            typeof toolData === "string" ? JSON.parse(toolData) : toolData;
+          console.log("🔧 Parsed tool:", tool);
           this.onToolActivationCallback(tool);
 
           // Check for end_call tool
-          if (tool?.name === 'end_call') {
+          if (tool?.name === "end_call") {
             if (this.onCallEndCallback) {
-              this.onCallEndCallback(tool.args?.reason || 'user_requested');
+              this.onCallEndCallback(tool.args?.reason || "user_requested");
             }
           }
+
+          // Check for escalate_to_agent tool - trigger escalation immediately
+          if (tool?.name === "escalate_to_agent") {
+            console.log("🚨 ESCALATION TOOL DETECTED - Triggering escalation");
+            const reason = tool.args?.reason || "agent_requested";
+            this.triggerEscalation(reason);
+          }
         } catch (e) {
-          // Not valid JSON
+          console.error("❌ Failed to parse tool JSON:", e, "Raw:", toolData);
         }
       }
     }
@@ -306,6 +335,7 @@ export class VoiceSocketService {
    */
   startStatePolling() {
     if (this.statePollingInterval) return;
+    this.escalationTriggered = false; // Track if we've already triggered escalation
 
     // Add a delay before starting to poll to ensure session reset completes
     setTimeout(() => {
@@ -315,17 +345,40 @@ export class VoiceSocketService {
           if (!response.ok) return;
 
           const state = await response.json();
+          console.log("📊 State poll:", {
+            is_active: state.is_active,
+            should_end: state.should_end,
+            end_reason: state.end_reason,
+          });
 
           // Handle call end from backend - ONLY if session is active
           // This prevents false triggers from stale state
-          if (state.is_active && state.should_end && this.onCallEndCallback) {
-            this.onCallEndCallback(state.end_reason);
-            this.stopStatePolling();
-            this.disconnect();
-          }
+          if (state.is_active && state.should_end) {
+            // Check if this is an escalation (reason contains escalation keywords)
+            const isEscalation =
+              state.end_reason &&
+              (state.end_reason.includes("escalat") ||
+                state.end_reason.includes("agent") ||
+                state.end_reason.includes("handoff") ||
+                state.end_reason.includes("transfer"));
 
+            if (isEscalation && !this.escalationTriggered) {
+              console.log(
+                "🚨 ESCALATION DETECTED via polling! Reason:",
+                state.end_reason,
+              );
+              this.escalationTriggered = true;
+              await this.triggerEscalation(state.end_reason);
+              this.stopStatePolling();
+              this.disconnect();
+            } else if (this.onCallEndCallback) {
+              this.onCallEndCallback(state.end_reason);
+              this.stopStatePolling();
+              this.disconnect();
+            }
+          }
         } catch (error) {
-          // Silently ignore polling errors
+          console.error("❌ State poll error:", error);
         }
       }, 1000); // Poll every 1 second
     }, 1500); // Wait 1.5 seconds before polling
@@ -343,20 +396,20 @@ export class VoiceSocketService {
    */
   startSession() {
     if (!this.localStream) {
-      console.warn('No local stream - call connect() first');
+      console.warn("No local stream - call connect() first");
       return false;
     }
 
     // Unmute microphone tracks
-    this.localStream.getAudioTracks().forEach(track => {
+    this.localStream.getAudioTracks().forEach((track) => {
       track.enabled = true;
     });
 
     this.sessionActive = true;
-    console.log('🎙️ Session started - microphone active');
+    console.log("🎙️ Session started - microphone active");
 
     if (this.onStateChangeCallback) {
-      this.onStateChangeCallback('listening');
+      this.onStateChangeCallback("listening");
     }
 
     return true;
@@ -369,15 +422,15 @@ export class VoiceSocketService {
     if (!this.localStream) return;
 
     // Mute microphone tracks
-    this.localStream.getAudioTracks().forEach(track => {
+    this.localStream.getAudioTracks().forEach((track) => {
       track.enabled = false;
     });
 
     this.sessionActive = false;
-    console.log('🔇 Session ended - microphone muted');
+    console.log("🔇 Session ended - microphone muted");
 
     if (this.onStateChangeCallback) {
-      this.onStateChangeCallback('idle');
+      this.onStateChangeCallback("idle");
     }
   }
 
@@ -400,9 +453,9 @@ export class VoiceSocketService {
   async setVoicePersona(persona) {
     try {
       const response = await fetch(`${BACKEND_URL}/api/voice/persona`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ persona })
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ persona }),
       });
 
       if (!response.ok) {
@@ -412,9 +465,8 @@ export class VoiceSocketService {
       const result = await response.json();
       console.log(`🔄 Voice persona changed to: ${persona}`);
       return result;
-
     } catch (error) {
-      console.error('Failed to change voice persona:', error);
+      console.error("Failed to change voice persona:", error);
       throw error;
     }
   }
@@ -425,10 +477,10 @@ export class VoiceSocketService {
   async getVoicePersona() {
     try {
       const response = await fetch(`${BACKEND_URL}/api/voice/persona`);
-      if (!response.ok) throw new Error('Failed to get persona');
+      if (!response.ok) throw new Error("Failed to get persona");
       return await response.json();
     } catch (error) {
-      console.error('Failed to get voice persona:', error);
+      console.error("Failed to get voice persona:", error);
       throw error;
     }
   }
@@ -484,10 +536,144 @@ export class VoiceSocketService {
   }
 
   /**
+   * Send escalation data to socket server with full conversation history
+   * @param {string} reason - Reason for escalation
+   */
+  async triggerEscalation(reason = "Voice call escalation") {
+    try {
+      console.log("🚨 Starting escalation process...");
+
+      // Fetch full conversation history from backend
+      const response = await fetch(`${BACKEND_URL}/api/session/history`);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch conversation history: ${response.status}`,
+        );
+      }
+
+      const historyData = await response.json();
+      console.log(
+        "📋 Fetched conversation history for escalation:",
+        historyData,
+      );
+
+      // Connect to socket server if not connected
+      if (
+        !this.socketServer ||
+        this.socketServer.readyState !== WebSocket.OPEN
+      ) {
+        console.log("📡 Connecting to socket server...");
+        await this.connectToSocketServer();
+      }
+
+      // Generate a session ID for this escalation
+      const escalationSessionId = `voice_esc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      // Start a session on socket server for this escalation
+      this.socketServer.send(
+        JSON.stringify({
+          type: "SESSION_START",
+          id: escalationSessionId, // Provide explicit session ID
+          sessionType: "voice",
+        }),
+      );
+      console.log("📤 SESSION_START sent with id:", escalationSessionId);
+
+      // Wait for session to be created, then send escalation
+      // Use a Promise to ensure we wait for ESCALATE to be sent before returning
+      await new Promise((resolve) => {
+        setTimeout(() => {
+          if (
+            this.socketServer &&
+            this.socketServer.readyState === WebSocket.OPEN
+          ) {
+            this.socketServer.send(
+              JSON.stringify({
+                type: "ESCALATE",
+                reason: reason,
+                metrics: historyData.metrics,
+                avgConfidence: historyData.stats?.avgConfidence,
+                summary: historyData.summary,
+                fullHistory: historyData.history,
+                customerPhone: historyData.customerPhone,
+                customerName: historyData.customerName,
+              }),
+            );
+            console.log("🚨 ESCALATE message sent to socket server");
+          } else {
+            console.error(
+              "❌ Socket server not connected when trying to send ESCALATE",
+            );
+          }
+          resolve();
+        }, 500);
+      });
+
+      // Keep socket open briefly to ensure message is delivered
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      console.log("✅ Escalation complete, socket can now be closed");
+    } catch (error) {
+      console.error("❌ Failed to trigger escalation:", error);
+    }
+  }
+
+  /**
+   * Connect to socket server for escalation handling
+   */
+  connectToSocketServer() {
+    return new Promise((resolve, reject) => {
+      if (
+        this.socketServer &&
+        this.socketServer.readyState === WebSocket.OPEN
+      ) {
+        resolve();
+        return;
+      }
+
+      console.log(
+        "📡 Creating new WebSocket connection to:",
+        SOCKET_SERVER_URL,
+      );
+      this.socketServer = new WebSocket(SOCKET_SERVER_URL);
+
+      this.socketServer.onopen = () => {
+        console.log("✅ Connected to socket server for escalation");
+        resolve();
+      };
+
+      this.socketServer.onmessage = (event) => {
+        console.log("📨 Socket server message:", event.data);
+      };
+
+      this.socketServer.onerror = (error) => {
+        console.error("❌ Socket server error:", error);
+        reject(error);
+      };
+
+      this.socketServer.onclose = () => {
+        console.log("🔌 Socket server connection closed");
+      };
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        if (this.socketServer.readyState !== WebSocket.OPEN) {
+          reject(new Error("Socket server connection timeout"));
+        }
+      }, 5000);
+    });
+  }
+
+  /**
    * Disconnect from FastRTC
    */
   disconnect() {
     this.stopStatePolling();
+
+    // Close socket server connection
+    if (this.socketServer) {
+      this.socketServer.close();
+      this.socketServer = null;
+    }
 
     if (this.dataChannel) {
       this.dataChannel.close();
@@ -495,7 +681,7 @@ export class VoiceSocketService {
     }
 
     if (this.localStream) {
-      this.localStream.getTracks().forEach(track => track.stop());
+      this.localStream.getTracks().forEach((track) => track.stop());
       this.localStream = null;
     }
 
@@ -511,10 +697,10 @@ export class VoiceSocketService {
     this.isConnected = false;
     this.sessionActive = false;
     this.webrtcId = null;
-    console.log('🔌 Disconnected from FastRTC');
+    console.log("🔌 Disconnected from FastRTC");
 
     if (this.onStateChangeCallback) {
-      this.onStateChangeCallback('disconnected');
+      this.onStateChangeCallback("disconnected");
     }
   }
 
@@ -526,7 +712,7 @@ export class VoiceSocketService {
       isConnected: this.isConnected,
       sessionActive: this.sessionActive,
       webrtcId: this.webrtcId,
-      connectionState: this.peerConnection?.connectionState || 'closed'
+      connectionState: this.peerConnection?.connectionState || "closed",
     };
   }
 }

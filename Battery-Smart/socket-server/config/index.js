@@ -1,6 +1,6 @@
 module.exports = {
   // Python backend URL (placeholder - update when Python backend is ready)
-  PYTHON_BACKEND_URL: process.env.PYTHON_BACKEND_URL || 'http://localhost:5000',
+  PYTHON_BACKEND_URL: process.env.PYTHON_BACKEND_URL || 'http://localhost:8000',
   
   // WebSocket server port
   WS_PORT: process.env.WS_PORT || 4001,

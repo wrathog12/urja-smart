@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useJsApiLoader } from '@react-google-maps/api';
-import { SWAP_STATIONS, DEFAULT_LOCATION, GOOGLE_MAPS_CONFIG } from '../constants';
-import { calculateStraightLineDistance, getTrafficAwareRoute } from '../utils';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useJsApiLoader } from "@react-google-maps/api";
+import {
+  SWAP_STATIONS,
+  DEFAULT_LOCATION,
+  GOOGLE_MAPS_CONFIG,
+} from "../constants";
+import { calculateStraightLineDistance, getTrafficAwareRoute } from "../utils";
 
-const libraries = ['places', 'geometry'];
+const libraries = ["places", "geometry"];
 
 export default function useMap() {
   const [userLocation, setUserLocation] = useState(null);
@@ -22,7 +26,7 @@ export default function useMap() {
 
   // Load Google Maps API
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
     libraries,
   });
 
@@ -43,11 +47,13 @@ export default function useMap() {
       },
       (error) => {
         console.error("Geolocation error:", error);
-        setLocationError("Unable to get your location. Using default location.");
+        setLocationError(
+          "Unable to get your location. Using default location.",
+        );
         setUserLocation(DEFAULT_LOCATION);
         setIsLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
     );
   }, []);
 
@@ -66,7 +72,7 @@ export default function useMap() {
             const route = await getTrafficAwareRoute(
               userLocation,
               { lat: station.lat, lng: station.lng },
-              apiKey
+              apiKey,
             );
 
             if (route) {
@@ -78,23 +84,31 @@ export default function useMap() {
               };
             }
           } catch (error) {
-            console.error('Error fetching route for station:', station.name, error);
+            console.error(
+              "Error fetching route for station:",
+              station.name,
+              error,
+            );
           }
 
           // Fallback to straight-line distance
           return {
             ...station,
             distance: calculateStraightLineDistance(
-              userLocation.lat, userLocation.lng,
-              station.lat, station.lng
+              userLocation.lat,
+              userLocation.lng,
+              station.lat,
+              station.lng,
             ),
             duration: null,
             isRoadDistance: false,
           };
-        })
+        }),
       );
 
-      const sortedStations = stationsWithRoutes.sort((a, b) => a.distance - b.distance);
+      const sortedStations = stationsWithRoutes.sort(
+        (a, b) => a.distance - b.distance,
+      );
       setStationsWithDistance(sortedStations);
       setNearestStation(sortedStations[0]);
       setRoutesLoading(false);
@@ -105,7 +119,7 @@ export default function useMap() {
 
   // Helper function to clear all polylines from the map
   const clearPolylines = useCallback(() => {
-    polylinesRef.current.forEach(polyline => {
+    polylinesRef.current.forEach((polyline) => {
       if (polyline) {
         polyline.setMap(null); // Remove from map
       }
@@ -117,11 +131,11 @@ export default function useMap() {
   const drawPolylines = useCallback((segments) => {
     if (!mapRef.current || !window.google) return;
 
-    segments.forEach(segment => {
+    segments.forEach((segment) => {
       // Draw border polyline
       const borderPolyline = new window.google.maps.Polyline({
         path: segment.path,
-        strokeColor: '#1a365d',
+        strokeColor: "#1a365d",
         strokeWeight: 8,
         strokeOpacity: 0.9,
         zIndex: 1,
@@ -143,36 +157,49 @@ export default function useMap() {
   }, []);
 
   // Show route for a specific station
-  const showRouteForStation = useCallback(async (station) => {
-    if (!userLocation) return;
+  const showRouteForStation = useCallback(
+    async (station) => {
+      if (!userLocation) return;
 
-    // Clear previous polylines first
-    clearPolylines();
-    setSelectedStation(station);
-    
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      // Clear previous polylines first
+      clearPolylines();
+      setSelectedStation(station);
 
-    // Get traffic-aware route with colored segments from Routes API
-    const trafficRoute = await getTrafficAwareRoute(
-      userLocation,
-      { lat: station.lat, lng: station.lng },
-      apiKey
-    );
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-    if (trafficRoute && trafficRoute.coloredSegments && trafficRoute.coloredSegments.length > 0) {
-      drawPolylines(trafficRoute.coloredSegments);
-    } else {
-      // Fallback: single blue segment for the straight line
-      console.warn('Routes API failed for station:', station.name, '- showing straight line');
-      drawPolylines([{
-        path: [
-          { lat: userLocation.lat, lng: userLocation.lng },
-          { lat: station.lat, lng: station.lng },
-        ],
-        color: '#4285F4',
-      }]);
-    }
-  }, [userLocation, clearPolylines, drawPolylines]);
+      // Get traffic-aware route with colored segments from Routes API
+      const trafficRoute = await getTrafficAwareRoute(
+        userLocation,
+        { lat: station.lat, lng: station.lng },
+        apiKey,
+      );
+
+      if (
+        trafficRoute &&
+        trafficRoute.coloredSegments &&
+        trafficRoute.coloredSegments.length > 0
+      ) {
+        drawPolylines(trafficRoute.coloredSegments);
+      } else {
+        // Fallback: single blue segment for the straight line
+        console.warn(
+          "Routes API failed for station:",
+          station.name,
+          "- showing straight line",
+        );
+        drawPolylines([
+          {
+            path: [
+              { lat: userLocation.lat, lng: userLocation.lng },
+              { lat: station.lat, lng: station.lng },
+            ],
+            color: "#4285F4",
+          },
+        ]);
+      }
+    },
+    [userLocation, clearPolylines, drawPolylines],
+  );
 
   // Callback when map loads
   const onMapLoad = useCallback((map) => {
@@ -191,7 +218,7 @@ export default function useMap() {
 
   // Toggle traffic layer visibility
   const toggleTraffic = useCallback(() => {
-    setShowTraffic(prev => !prev);
+    setShowTraffic((prev) => !prev);
   }, []);
 
   return {
@@ -213,4 +240,3 @@ export default function useMap() {
     clearPolylines,
   };
 }
-

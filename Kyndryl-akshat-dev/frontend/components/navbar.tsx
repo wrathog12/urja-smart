@@ -21,40 +21,44 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import logo from '../../../Battery-Smart/my-app/src/assets/logo.png';
 
+interface NavbarProps {
+  children?: React.ReactNode;
+}
+
 const defaultNavItems = [
-  { href: 'http://localhost:3001/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: 'http://localhost:3001/maps', label: 'Maps', icon: Map },
+  { href: 'http://localhost:4000/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: 'http://localhost:4000/maps', label: 'Maps', icon: Map },
   // { href: 'http://localhost:3001/', label: 'Chatbot', icon: Bot},
   // { href: '/admin', label: 'Admin', icon: ShieldUser },
 ];
 
 const partnerNavItems = [
-  { href: 'http://localhost:3001/onboard', label: 'Onboard', icon: UserPlus },
-  { href: 'http://localhost:3001/partnerDashboard', label: 'Partner Dashboard', icon: Gauge },
+  { href: 'http://localhost:4000/onboard', label: 'Onboard', icon: UserPlus },
+  { href: 'http://localhost:4000/partnerDashboard', label: 'Partner Dashboard', icon: Gauge },
 ];
 
 const dropdownItems = [
-  { href: 'http://localhost:3001/invoices', label: 'Invoices', icon: ReceiptIndianRupee},
+  { href: 'http://localhost:4000/invoices', label: 'Invoices', icon: ReceiptIndianRupee},
   { href: '/partner', label: 'Partner', icon: ShieldUser},
   { href: '/settings', label: 'Settings', icon: Settings},
 ];
 
-export default function Navbar({ children }) {
+export default function Navbar({ children }: NavbarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const pathname = usePathname();
-  const isActive = (href) => pathname === href;
+  const isActive = (href: string) => pathname === href;
   
   // Determine which nav items to show based on current route
   const isPartnerRoute = pathname.startsWith('/partner') || pathname.startsWith('/partnerDashboard') || pathname.startsWith('/onboard');
   const navItems = isPartnerRoute ? partnerNavItems : defaultNavItems;
 
     const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
@@ -63,12 +67,12 @@ export default function Navbar({ children }) {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div className="flex flex-col bg-white">
       {/* Navbar */}
       <nav className="bg-white border-b border-gray-200 px-4 lg:px-6">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="http://localhost:3001/dashboard" className="flex items-center">
+          <Link href="http://localhost:4000/dashboard" className="flex items-center">
             <Image src={logo} alt="Battery Smart Logo" width={52} height={52} />
             <span className="font-semibold text-xl text-blue-600 hidden sm:block">
               Battery Smart
@@ -100,7 +104,7 @@ export default function Navbar({ children }) {
               <button
                 onClick={() => setOpen(!open)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                  isActive("http://localhost:3001/")
+                  isActive("http://localhost:4000/")
                     ? "bg-blue-50 text-green-600"
                     : "text-blue-400 hover:bg-blue-50 hover:text-green-600"
                 }`}
@@ -135,25 +139,25 @@ export default function Navbar({ children }) {
           </div>
 
           <div className="flex items-center gap-2 mr-6">
-            <Link href="/">
+            <Link href="http://localhost:4000/">
               {/* Battery Button with Charging Animation */}
               <div className="group hidden md:flex relative cursor-pointer">
                 {/* Battery Body */}
                 <div className={`relative flex items-center justify-center px-5 py-2 border-2 rounded-lg overflow-hidden transition-all duration-300 ${
-                  isActive('http://localhost:3001/')
+                  isActive('http://localhost:4000/')
                     ? 'border-green-500 bg-green-50'
                     : 'border-blue-600 bg-white hover:border-blue-600'
                 }`}>
                   {/* Charging Fill Animation */}
                   <div className={`absolute left-0 top-0 h-full bg-green-400 transition-all duration-700 ease-out ${
-                    isActive('http://localhost:3001/') 
+                    isActive('http://localhost:4000/') 
                       ? 'w-full' 
                       : 'w-0 group-hover:w-full'
                   }`} />
                   
                   {/* Content */}
                   <div className={`relative z-10 flex items-center gap-2 font-medium transition-colors duration-300 ${
-                    isActive('http://localhost:3001/')
+                    isActive('http://localhost:4000/')
                       ? 'text-blue-700'
                       : 'text-blue-600 group-hover:text-blue-600'
                   }`}>
@@ -164,7 +168,7 @@ export default function Navbar({ children }) {
                 
                 {/* Battery Head */}
                 <div className={`absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-4 rounded-r-sm transition-colors duration-300 ${
-                  isActive('http://localhost:3001/voicebot')
+                  isActive('http://localhost:4000/voicebot')
                     ? 'bg-green-500'
                     : 'bg-blue-600 group-hover:bg-green-500'
                 }`} />
@@ -210,10 +214,7 @@ export default function Navbar({ children }) {
         )}
       </nav>
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-auto bg-gray-50">
-        {children}
-      </div>
+      
     </div>
   );
 }

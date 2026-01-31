@@ -2,10 +2,15 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Find the project root (where test4.py is)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
+
+# Load .env into system environment variables BEFORE any SDK initializes
+# This prevents warnings from Deepgram/Groq/Cartesia SDKs that check os.getenv()
+load_dotenv(ENV_FILE)
 
 class Settings(BaseSettings):
     """

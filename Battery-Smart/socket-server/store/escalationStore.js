@@ -12,27 +12,103 @@ const escalatedCalls = new Map();
  * @param {string} params.type - Type of session ('voice' or 'chat')
  * @param {string} params.reason - Reason for escalation
  * @param {Array} params.history - Conversation history (transcripts or messages)
+ * @param {Object} params.metrics - Performance metrics (stt, llm, tts latencies)
+ * @param {number} params.avgConfidence - Average STT confidence score
+ * @param {string} params.summary - AI-generated conversation summary
+ * @param {string} params.customerPhone - Customer phone number for callback
+ * @param {string} params.customerName - Customer name
  * @returns {Object} - Created escalation object
  */
-function createEscalation({ sessionId, type, reason, history }) {
+function createEscalation({
+  sessionId,
+  type,
+  reason,
+  history,
+  metrics,
+  avgConfidence,
+  summary,
+  customerPhone,
+  customerName,
+}) {
   const escalationId = `esc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
+
+  // Calculate stats from history if not provided
+  const userMessages = (history || []).filter((m) => m.sender === "user");
+  const confidenceScores = userMessages
+    .map((m) => m.confidence)
+    .filter((c) => c !== null && c !== undefined);
+
+  const calculatedAvgConfidence =
+    confidenceScores.length > 0
+      ? confidenceScores.reduce((a, b) => a + b, 0) / confidenceScores.length
+      : null;
+
   const escalation = {
     id: escalationId,
     sessionId,
     type,
     reason,
     history: history || [],
-    status: 'pending', // 'pending' | 'in-progress' | 'resolved'
+    metrics: metrics || {},
+    avgConfidence: avgConfidence ?? calculatedAvgConfidence,
+    summary: summary || generateQuickSummary(history || []),
+    status: "pending", // 'pending' | 'in-progress' | 'resolved'
     createdAt: new Date().toISOString(),
     resolvedAt: null,
-    resolvedBy: null
+    resolvedBy: null,
+    // Customer contact info
+    customerPhone: customerPhone || null,
+    customerName: customerName || null,
+    // Transcript stats
+    stats: {
+      totalTurns: (history || []).length,
+      userMessages: userMessages.length,
+      botMessages: (history || []).filter((m) => m.sender === "bot").length,
+      lowConfidenceCount: confidenceScores.filter((c) => c < 0.7).length,
+      avgConfidence: calculatedAvgConfidence,
+    },
   };
-  
+
   escalatedCalls.set(escalationId, escalation);
   console.log(`Created escalation ${escalationId} for session ${sessionId}`);
-  
+
   return escalation;
+}
+
+/**
+ * Generate a quick summary from conversation history
+ * @param {Array} history - Conversation history
+ * @returns {string} - Quick summary
+ */
+function generateQuickSummary(history) {
+  if (!history || history.length === 0) {
+    return "No conversation history available.";
+  }
+
+  const userMessages = history
+    .filter((m) => m.sender === "user")
+    .map((m) => m.text);
+  const lastUserMessage = userMessages[userMessages.length - 1] || "";
+
+  // Extract key topics (simple keyword extraction)
+  const keywords = [];
+  const keywordPatterns = [
+    { pattern: /invoice|bill|payment|paisa/i, topic: "Invoice/Payment" },
+    { pattern: /battery|swap|charge/i, topic: "Battery/Swap" },
+    { pattern: /station|location|nearest/i, topic: "Station Location" },
+    { pattern: /problem|issue|help|complaint/i, topic: "Support Issue" },
+    { pattern: /penalty|fine|late/i, topic: "Penalty Inquiry" },
+  ];
+
+  const allText = userMessages.join(" ");
+  keywordPatterns.forEach(({ pattern, topic }) => {
+    if (pattern.test(allText)) keywords.push(topic);
+  });
+
+  const topicsStr =
+    keywords.length > 0 ? keywords.join(", ") : "General inquiry";
+
+  return `Customer discussed: ${topicsStr}. Last message: "${lastUserMessage.substring(0, 100)}${lastUserMessage.length > 100 ? "..." : ""}"`;
 }
 
 /**
@@ -52,7 +128,7 @@ function getEscalation(id) {
 function getAllEscalations(status = null) {
   const all = Array.from(escalatedCalls.values());
   if (status) {
-    return all.filter(e => e.status === status);
+    return all.filter((e) => e.status === status);
   }
   return all;
 }
@@ -62,7 +138,9 @@ function getAllEscalations(status = null) {
  * @returns {Array} - Array of pending escalation objects
  */
 function getPendingEscalations() {
-  return Array.from(escalatedCalls.values()).filter(e => e.status !== 'resolved');
+  return Array.from(escalatedCalls.values()).filter(
+    (e) => e.status !== "resolved",
+  );
 }
 
 /**
@@ -75,7 +153,7 @@ function addMessageToEscalation(escalationId, message) {
   if (escalation) {
     escalation.history.push({
       ...message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }
 }
@@ -91,7 +169,7 @@ function updateEscalationStatus(id, status, resolvedBy = null) {
   const escalation = escalatedCalls.get(id);
   if (escalation) {
     escalation.status = status;
-    if (status === 'resolved') {
+    if (status === "resolved") {
       escalation.resolvedAt = new Date().toISOString();
       escalation.resolvedBy = resolvedBy;
     }
@@ -115,7 +193,9 @@ function deleteEscalation(id) {
  * @returns {Object|undefined} - Escalation object or undefined
  */
 function getEscalationBySessionId(sessionId) {
-  return Array.from(escalatedCalls.values()).find(e => e.sessionId === sessionId);
+  return Array.from(escalatedCalls.values()).find(
+    (e) => e.sessionId === sessionId,
+  );
 }
 
 module.exports = {
@@ -126,5 +206,5 @@ module.exports = {
   addMessageToEscalation,
   updateEscalationStatus,
   deleteEscalation,
-  getEscalationBySessionId
+  getEscalationBySessionId,
 };
