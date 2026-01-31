@@ -12,6 +12,7 @@
     "@react-google-maps/api": "^2.20.8",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
+    "@vis.gl/react-google-maps": "^1.7.1",
     "framer-motion": "^12.29.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.563.0",
