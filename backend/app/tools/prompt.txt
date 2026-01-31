@@ -1,0 +1,34 @@
+@Context
+We are building a Voice AI Backend using FastAPI and FastRTC. 
+We have a "Router" LLM (Llama-3) that outputs a hybrid string containing both a Hidden Tool Trigger (JSON) and Spoken Text (Hinglish).
+
+@Input Format
+The LLM returns strings like this:
+"[TOOL: {"name": "get_nearest_station", "args": {"lat": 28.61, "lon": 77.20}}] Haanji Sir, main aapke paas wale station dhoond raha hoon."
+
+@Task
+Create a robust `ToolExecutor` service in `backend/app/tools/executor.py` that handles this parsing and execution.
+
+@Requirements
+1. **Regex Parsing:** Write a method `parse_response(llm_response: str)` that separates the JSON part (`[TOOL: ...]`) from the Clean Speech part.
+   - If no tool is found (or `null`), return `None` for the tool.
+   - The Clean Speech must be stripped of the tool tag so the TTS doesn't read it out loud.
+
+2. **Dynamic Execution:** Implement a method `execute_tool(tool_name, args)` that:
+   - Maps string names (e.g., "get_nearest_station") to actual Python functions imported from `backend/app/tools/definitions.py` (or similar).
+   - Uses `getattr` or a dictionary map to call the function dynamically.
+   - Handles `KeyError` if the LLM hallucinates a tool name that doesn't exist.
+
+3. **Non-Blocking Architecture:**
+   - The `parse_response` method must return the `speech_text` IMMEDIATELY so I can send it to the TTS engine.
+   - The `execute_tool` should ideally be designed to run as a background task (using `asyncio.create_task` or `BackgroundTasks`) so the user hears "Checking now..." *while* the database query is running.
+
+4. **Error Handling:** - If the JSON is malformed, log the error but DO NOT crash. Just return the speech.
+   - If the tool execution fails, log it, but don't stop the voice stream.
+
+@File Structure
+- `backend/app/tools/executor.py`: The logic you write.
+- `backend/app/tools/definitions.py`: Dummy functions for `get_nearest_station`, `check_invoice`, etc. (Create this too).
+
+@Output
+Please provide the full code for `executor.py` and `definitions.py`.
