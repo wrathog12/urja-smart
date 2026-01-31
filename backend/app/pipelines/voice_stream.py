@@ -31,8 +31,11 @@ MIN_TEXT_LENGTH = 3  # Reject very short transcriptions (likely noise)
 ESCALATION_SENTIMENT_THRESHOLD = 0.3  # Auto-escalate if sentiment drops below this
 
 # --- Barge-In Configuration ---
+# Toggle this to True to enable barge-in (user can interrupt bot)
+BARGE_IN_ENABLED = False  # DISABLED: Bot finishes speaking before processing next input
+
 MIN_AUDIO_ENERGY = 800       # Minimum energy to even consider audio
-BARGE_IN_ENERGY = 1500       # Higher threshold for interrupting during TTS
+BARGE_IN_ENERGY = 2000       # Higher threshold for interrupting during TTS (was 1500)
 BARGE_IN_CHUNKS_REQUIRED = 3 # Must sustain for 3 chunks (~1.5 sec) to interrupt
 
 # --- Global Session State (accessible from main.py) ---
@@ -164,9 +167,20 @@ def voice_handler(audio: tuple[int, np.ndarray]):
     if len(chat_history) > 10:
         chat_history = chat_history[-10:]
     
+    # 3.5 INJECT TOOL STATE CONTEXT (helps LLM understand current step)
+    context_messages = []
+    if invoice_tool.state == "awaiting_id":
+        context_messages.append({"role": "system", "content": "CONTEXT: Invoice flow active. Waiting for user to provide Driver ID."})
+    elif invoice_tool.state == "confirming":
+        context_messages.append({"role": "system", "content": f"CONTEXT: Invoice flow active. Waiting for user to CONFIRM Driver ID '{invoice_tool.driver_id}'. If user says yes/haan/sahi, use action='confirm' with confirmed=true."})
+    elif invoice_tool.state == "confirmed":
+        context_messages.append({"role": "system", "content": "CONTEXT: Invoice confirmed. User may ask for penalty, swaps, or summary."})
+    
     # 4. THE BRAIN (LLM - Groq/Llama)
     print("🧠 Thinking...")
-    speech_text, tool_data, sentiment_score = llm_service.get_response(chat_history)
+    # Pass chat history with context if available
+    messages_for_llm = chat_history + context_messages if context_messages else chat_history
+    speech_text, tool_data, sentiment_score = llm_service.get_response(messages_for_llm)
     
     t_llm = time.perf_counter()
     session_state["metrics"]["llm"] = (t_llm - t_stt) * 1000
@@ -321,12 +335,12 @@ def handle_additional_outputs(
 
 
 # --- THE STREAM OBJECT ---
-# NOTE: can_interrupt=False means no barge-in. This is intentional for stability.
-# FastRTC's interrupt mechanism kills the generator before our code can handle it.
+# Barge-in is controlled by BARGE_IN_ENABLED toggle at top of file.
+# If issues arise, set BARGE_IN_ENABLED = False and restart.
 voice_stream = Stream(
     ReplyOnPause(
         voice_handler,
-        can_interrupt=False  # STABLE: Bot finishes speaking before processing new input
+        can_interrupt=BARGE_IN_ENABLED,  # Controlled by toggle at line 35
     ),
     modality="audio",
     mode="send-receive",
