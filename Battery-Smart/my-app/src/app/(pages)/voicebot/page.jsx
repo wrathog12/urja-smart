@@ -353,7 +353,7 @@ export default function HomePage() {
           </button>
 
           {/* ChatBot Button */}
-          <a href="/chatbot">
+          <a href="http://localhost:4002">
             <button
               className="px-4 py-2 rounded-full font-medium text-white text-lg bg-blue-500 hover:bg-blue-600 active:scale-95 transition-all duration-200"
             >
