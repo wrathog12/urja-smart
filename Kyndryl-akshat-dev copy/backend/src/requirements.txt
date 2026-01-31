@@ -1,0 +1,55 @@
+# Core utilities
+numpy==1.26.4
+pytz==2025.1
+python-dotenv==1.0.1
+
+# PDF processing
+pymupdf==1.25.2
+
+# OCR Processing
+pytesseract==0.3.13
+Pillow==10.0.0
+
+# Speech-to-Text
+SpeechRecognition==3.10.0
+pydub==0.25.1
+
+# AWS/Azure storage (optional)
+boto3==1.37.1
+aioboto3==14.1.0
+botocore==1.37.1
+
+# MongoDB
+pymongo[srv]==4.10.1
+motor==3.7.0
+dnspython==2.4.2
+
+# SSL/TLS support for MongoDB Atlas
+certifi==2024.12.14
+pyopenssl==24.0.0
+
+# FastAPI
+fastapi==0.115.8
+uvicorn[standard]==0.34.0
+python-multipart==0.0.9
+
+# LangChain
+langchain==0.3.17
+langchain_ollama==0.2.3
+langchain-text-splitters==0.3.5
+
+# Pydantic
+pydantic==2.10.6
+pydantic-settings==2.7.1
+
+# Vector database
+qdrant-client==1.13.2
+
+# Azure OpenAI
+openai==1.58.1
+
+# Text-to-Speech
+elevenlabs==0.2.26
+
+# Azure Storage
+azure-storage-blob==12.19.0

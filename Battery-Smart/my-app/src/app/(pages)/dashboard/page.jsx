@@ -14,7 +14,8 @@ import {
   TrendingUp,
   Calendar,
   FileText,
-  ChevronDown
+  ChevronDown,
+  User
 } from 'lucide-react';
 
 // Dummy data for the dashboard
@@ -179,9 +180,17 @@ export default function Dashboard() {
   return (
     <div className="p-6 md:p-8 w-screen space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl md:text-3xl font-semibold text-gray-800">Dashboard</h1>
-        <p className="text-gray-500 mt-1">Welcome back! Here's your battery usage overview.</p>
+      <div className='flex justify-between'>
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold text-gray-800">Dashboard</h1>
+          <p className="text-gray-500 mt-1">Welcome back! Here's your battery usage overview.</p>
+        </div>
+        <div>
+          <div className='flex items-center gap-2'><User className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center"/>
+          <div><h1 className="text-2xl md:text-3xl font-semibold text-gray-800">Abhishek</h1>
+          <p className="text-gray-500">Rider</p></div></div>
+          
+        </div>
       </div>
       
       {/* Section 1: Today's Summary */}

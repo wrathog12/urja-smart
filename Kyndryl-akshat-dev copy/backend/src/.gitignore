@@ -1,0 +1,10 @@
+# env files and pycache
+.env
+__pycache__/
+__pycache__
+*.pyc
+# back up files
+.backup
+.py.backup
+
+__init__.py

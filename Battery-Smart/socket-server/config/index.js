@@ -3,7 +3,7 @@ module.exports = {
   PYTHON_BACKEND_URL: process.env.PYTHON_BACKEND_URL || 'http://localhost:5000',
   
   // WebSocket server port
-  WS_PORT: process.env.WS_PORT || 8080,
+  WS_PORT: process.env.WS_PORT || 4001,
   
   // Audio settings
   AUDIO_FORMAT: 'webm',
