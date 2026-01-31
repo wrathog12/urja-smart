@@ -67,7 +67,7 @@ export default function Navbar({ children }: NavbarProps) {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div className="flex flex-col bg-white">
       {/* Navbar */}
       <nav className="bg-white border-b border-gray-200 px-4 lg:px-6">
         <div className="flex items-center justify-between h-16">
@@ -139,7 +139,7 @@ export default function Navbar({ children }: NavbarProps) {
           </div>
 
           <div className="flex items-center gap-2 mr-6">
-            <Link href="/">
+            <Link href="http://localhost:4000/">
               {/* Battery Button with Charging Animation */}
               <div className="group hidden md:flex relative cursor-pointer">
                 {/* Battery Body */}
@@ -214,10 +214,7 @@ export default function Navbar({ children }: NavbarProps) {
         )}
       </nav>
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-auto bg-gray-50">
-        {children}
-      </div>
+      
     </div>
   );
 }

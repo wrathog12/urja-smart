@@ -99,11 +99,7 @@ export default function Navbar({ children }) {
             <div ref={ref} className="relative">
               <button
                 onClick={() => setOpen(!open)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                  isActive("/")
-                    ? "bg-blue-50 text-green-600"
-                    : "text-blue-400 hover:bg-blue-50 hover:text-green-600"
-                }`}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors text-blue-400 hover:bg-blue-50 hover:text-green-600"
               >
                 <MenuIcon className="w-4 h-4" />
                 <span className="text-sm">Menu</span>

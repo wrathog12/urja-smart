@@ -260,7 +260,7 @@ export default function HomePage() {
         </div>
 
         {/* Voice Agent Orb */}
-        <div className="relative mt-4">
+        <div className="">
           <VoiceAgent
             ref={voiceAgentRef}
             state={voiceAgentState}
