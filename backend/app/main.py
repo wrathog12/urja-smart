@@ -83,7 +83,8 @@ async def get_session_state():
         "last_bot_text": session_state.get("last_bot_text", ""),
         "last_tool": session_state.get("last_tool"),
         "last_sentiment": session_state.get("last_sentiment", 0.7),
-        "metrics": session_state.get("metrics", {})
+        "metrics": session_state.get("metrics", {}),
+        "station_data": session_state.get("station_data")  # For map popup
     }
 
 @app.post("/api/session/reset")

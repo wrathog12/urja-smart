@@ -1,23 +1,30 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { SWAP_STATIONS, DEFAULT_LOCATION, MAP_CONFIG, LEAFLET_CDN, ROUTE_STYLES } from '../constants';
-import { getRouteInfo, calculateStraightLineDistance } from '../utils';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useJsApiLoader } from '@react-google-maps/api';
+import { SWAP_STATIONS, DEFAULT_LOCATION, GOOGLE_MAPS_CONFIG } from '../constants';
+import { calculateStraightLineDistance, getTrafficAwareRoute } from '../utils';
+
+const libraries = ['places', 'geometry'];
 
 export default function useMap() {
   const [userLocation, setUserLocation] = useState(null);
   const [locationError, setLocationError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [mapReady, setMapReady] = useState(false);
   const [nearestStation, setNearestStation] = useState(null);
   const [stationsWithDistance, setStationsWithDistance] = useState([]);
   const [routesLoading, setRoutesLoading] = useState(false);
   const [selectedStation, setSelectedStation] = useState(null);
-  
+  const [showTraffic, setShowTraffic] = useState(true);
+
   const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const routeLayersRef = useRef([]);
-  const leafletRef = useRef(null);
+  const polylinesRef = useRef([]); // Store polyline objects for manual management
+
+  // Load Google Maps API
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+    libraries,
+  });
 
   // Get user's current location
   useEffect(() => {
@@ -44,237 +51,166 @@ export default function useMap() {
     );
   }, []);
 
-  // Calculate road distances using OSRM API
+  // Calculate distances using Routes API (traffic-aware)
   useEffect(() => {
     if (!userLocation) return;
 
-    const fetchRouteDistances = async () => {
+    const fetchDistances = async () => {
       setRoutesLoading(true);
-      
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+      // Fetch distances for all stations using Routes API
       const stationsWithRoutes = await Promise.all(
         SWAP_STATIONS.map(async (station) => {
-          const routeInfo = await getRouteInfo(
-            userLocation.lat, userLocation.lng,
-            station.lat, station.lng
-          );
-          
-          if (routeInfo) {
-            return {
-              ...station,
-              distance: routeInfo.distance,
-              duration: routeInfo.duration,
-              geometry: routeInfo.geometry,
-              isRoadDistance: true,
-            };
-          } else {
-            return {
-              ...station,
-              distance: calculateStraightLineDistance(
-                userLocation.lat, userLocation.lng,
-                station.lat, station.lng
-              ),
-              duration: null,
-              geometry: null,
-              isRoadDistance: false,
-            };
+          try {
+            const route = await getTrafficAwareRoute(
+              userLocation,
+              { lat: station.lat, lng: station.lng },
+              apiKey
+            );
+
+            if (route) {
+              return {
+                ...station,
+                distance: route.distance, // km
+                duration: route.duration, // minutes (traffic-aware)
+                isRoadDistance: true,
+              };
+            }
+          } catch (error) {
+            console.error('Error fetching route for station:', station.name, error);
           }
+
+          // Fallback to straight-line distance
+          return {
+            ...station,
+            distance: calculateStraightLineDistance(
+              userLocation.lat, userLocation.lng,
+              station.lat, station.lng
+            ),
+            duration: null,
+            isRoadDistance: false,
+          };
         })
       );
 
       const sortedStations = stationsWithRoutes.sort((a, b) => a.distance - b.distance);
-      
       setStationsWithDistance(sortedStations);
       setNearestStation(sortedStations[0]);
       setRoutesLoading(false);
     };
 
-    fetchRouteDistances();
+    fetchDistances();
   }, [userLocation]);
 
-  // Function to show route for a specific station
-  const showRouteForStation = useCallback((station) => {
-    if (!mapInstanceRef.current || !leafletRef.current || !userLocation) return;
-    
-    const L = leafletRef.current;
-    
-    // Clear existing routes
-    routeLayersRef.current.forEach(layer => {
-      mapInstanceRef.current.removeLayer(layer);
+  // Helper function to clear all polylines from the map
+  const clearPolylines = useCallback(() => {
+    polylinesRef.current.forEach(polyline => {
+      if (polyline) {
+        polyline.setMap(null); // Remove from map
+      }
     });
-    routeLayersRef.current = [];
-    
-    // Set selected station
+    polylinesRef.current = []; // Clear the array
+  }, []);
+
+  // Helper function to draw polylines on the map
+  const drawPolylines = useCallback((segments) => {
+    if (!mapRef.current || !window.google) return;
+
+    segments.forEach(segment => {
+      // Draw border polyline
+      const borderPolyline = new window.google.maps.Polyline({
+        path: segment.path,
+        strokeColor: '#1a365d',
+        strokeWeight: 8,
+        strokeOpacity: 0.9,
+        zIndex: 1,
+        map: mapRef.current,
+      });
+      polylinesRef.current.push(borderPolyline);
+
+      // Draw colored polyline on top
+      const coloredPolyline = new window.google.maps.Polyline({
+        path: segment.path,
+        strokeColor: segment.color,
+        strokeWeight: 5,
+        strokeOpacity: 0.95,
+        zIndex: 2,
+        map: mapRef.current,
+      });
+      polylinesRef.current.push(coloredPolyline);
+    });
+  }, []);
+
+  // Show route for a specific station
+  const showRouteForStation = useCallback(async (station) => {
+    if (!userLocation) return;
+
+    // Clear previous polylines first
+    clearPolylines();
     setSelectedStation(station);
     
-    // Draw route for selected station
-    if (station.geometry) {
-      const routeCoordinates = station.geometry.coordinates.map(coord => [coord[1], coord[0]]);
-      const routeLayer = L.polyline(routeCoordinates, {
-        ...ROUTE_STYLES.selected,
-        lineJoin: 'round'
-      }).addTo(mapInstanceRef.current);
-      routeLayersRef.current.push(routeLayer);
-    } else {
-      const routeLayer = L.polyline(
-        [[userLocation.lat, userLocation.lng], [station.lat, station.lng]],
-        ROUTE_STYLES.fallback
-      ).addTo(mapInstanceRef.current);
-      routeLayersRef.current.push(routeLayer);
-    }
-    
-    // Pan to show both user and station
-    const bounds = L.latLngBounds(
-      [userLocation.lat, userLocation.lng],
-      [station.lat, station.lng]
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+    // Get traffic-aware route with colored segments from Routes API
+    const trafficRoute = await getTrafficAwareRoute(
+      userLocation,
+      { lat: station.lat, lng: station.lng },
+      apiKey
     );
-    mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50] });
-  }, [userLocation]);
 
-  // Initialize Leaflet map
+    if (trafficRoute && trafficRoute.coloredSegments && trafficRoute.coloredSegments.length > 0) {
+      drawPolylines(trafficRoute.coloredSegments);
+    } else {
+      // Fallback: single blue segment for the straight line
+      console.warn('Routes API failed for station:', station.name, '- showing straight line');
+      drawPolylines([{
+        path: [
+          { lat: userLocation.lat, lng: userLocation.lng },
+          { lat: station.lat, lng: station.lng },
+        ],
+        color: '#4285F4',
+      }]);
+    }
+  }, [userLocation, clearPolylines, drawPolylines]);
+
+  // Callback when map loads
+  const onMapLoad = useCallback((map) => {
+    mapRef.current = map;
+  }, []);
+
+  // Fit bounds to show user and selected station
   useEffect(() => {
-    if (!userLocation || !mapRef.current || mapInstanceRef.current) return;
+    if (!mapRef.current || !userLocation || !selectedStation) return;
 
-    import('leaflet').then((L) => {
-      // Fix Leaflet default marker icon issue
-      delete L.Icon.Default.prototype._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: LEAFLET_CDN.markerIcon2x,
-        iconUrl: LEAFLET_CDN.markerIcon,
-        shadowUrl: LEAFLET_CDN.markerShadow,
-      });
+    const bounds = new window.google.maps.LatLngBounds();
+    bounds.extend(userLocation);
+    bounds.extend({ lat: selectedStation.lat, lng: selectedStation.lng });
+    mapRef.current.fitBounds(bounds, { padding: 50 });
+  }, [selectedStation, userLocation]);
 
-      // Create map
-      const map = L.map(mapRef.current).setView(
-        [userLocation.lat, userLocation.lng], 
-        MAP_CONFIG.defaultZoom
-      );
-      mapInstanceRef.current = map;
-
-      // Add OpenStreetMap tiles
-      L.tileLayer(MAP_CONFIG.tileLayerUrl, {
-        attribution: MAP_CONFIG.attribution,
-        maxZoom: MAP_CONFIG.maxZoom,
-      }).addTo(map);
-
-      // Custom icon for user location
-      const userIcon = L.divIcon({
-        className: 'custom-user-marker',
-        html: `<div style="
-          width: 24px;
-          height: 24px;
-          background: #3b82f6;
-          border: 4px solid white;
-          border-radius: 50%;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        "></div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      });
-
-      // Add user location marker
-      L.marker([userLocation.lat, userLocation.lng], { icon: userIcon })
-        .addTo(map)
-        .bindPopup(`
-          <div style="text-align: center; padding: 8px;">
-            <strong style="color: #3b82f6;">📍 Your Location</strong>
-          </div>
-        `);
-
-      // Custom icon for stations
-      const createStationIcon = (isNearest) => L.divIcon({
-        className: 'custom-station-marker',
-        html: `<div style="
-          width: 36px;
-          height: 36px;
-          background: ${isNearest ? '#22c55e' : '#16a34a'};
-          border: 3px solid white;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          ${isNearest ? 'animation: pulse 2s infinite;' : ''}
-        ">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-            <rect x="6" y="4" width="12" height="16" rx="2" stroke="white" stroke-width="2" fill="none"/>
-            <rect x="8" y="6" width="8" height="6" fill="white"/>
-            <line x1="10" y1="2" x2="10" y2="4" stroke="white" stroke-width="2"/>
-            <line x1="14" y1="2" x2="14" y2="4" stroke="white" stroke-width="2"/>
-          </svg>
-        </div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
-      });
-
-      // Store Leaflet reference
-      leafletRef.current = L;
-
-      // Add station markers
-      stationsWithDistance.forEach((station, index) => {
-        const isNearest = index === 0;
-        const marker = L.marker([station.lat, station.lng], { 
-          icon: createStationIcon(isNearest) 
-        }).addTo(map);
-
-        marker.bindPopup(`
-          <div style="padding: 12px; min-width: 200px;">
-            <h3 style="margin: 0 0 8px 0; color: ${isNearest ? '#22c55e' : '#16a34a'}; font-size: 14px; font-weight: 600;">
-              ${isNearest ? '⭐ NEAREST - ' : ''}${station.name}
-            </h3>
-            <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #666;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span>🛣️ ${station.distance.toFixed(2)} km ${station.isRoadDistance ? '(by road)' : '(straight line)'}</span>
-              </div>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span>🔋 ${station.batteries} batteries available</span>
-              </div>
-            </div>
-            ${isNearest ? '<p style="margin: 8px 0 0 0; font-size: 11px; color: #22c55e; font-weight: 500;">This is your nearest swap station!</p>' : ''}
-          </div>
-        `);
-
-        // Show route when marker is clicked
-        marker.on('click', () => {
-          showRouteForStation(station);
-        });
-      });
-
-      // Add CSS animation for pulsing effect
-      const style = document.createElement('style');
-      style.textContent = `
-        @keyframes pulse {
-          0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
-          70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
-        }
-      `;
-      document.head.appendChild(style);
-
-      setMapReady(true);
-    });
-
-    // Cleanup on unmount
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
-    };
-  }, [userLocation, stationsWithDistance, showRouteForStation]);
+  // Toggle traffic layer visibility
+  const toggleTraffic = useCallback(() => {
+    setShowTraffic(prev => !prev);
+  }, []);
 
   return {
     // State
     userLocation,
     locationError,
-    isLoading,
-    mapReady,
+    isLoading: isLoading || !isLoaded,
+    mapReady: isLoaded && !loadError,
     nearestStation,
     stationsWithDistance,
     routesLoading,
     selectedStation,
-    // Refs
-    mapRef,
+    loadError,
+    showTraffic,
     // Actions
     showRouteForStation,
+    onMapLoad,
+    toggleTraffic,
+    clearPolylines,
   };
 }
+
