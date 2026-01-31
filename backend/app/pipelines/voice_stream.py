@@ -22,6 +22,7 @@ from backend.app.tools.handoff import handoff_guard
 from backend.app.tools.end_call import end_call_tool
 from backend.app.tools.battery import station_tool
 from backend.app.tools.knowledge_base import knowledge_tool
+from backend.app.tools.invoice import invoice_tool
 from backend.app.core.prompts import ESCALATION_MESSAGE, END_CALL_MESSAGE, SALES_PITCH
 
 # --- Configuration ---
@@ -60,6 +61,7 @@ def reset_session():
     global chat_history, session_state
     chat_history = []
     end_call_tool.reset()
+    invoice_tool.reset()
     handoff_guard.strike_count = 0
     session_state.update({
         "is_active": False,
@@ -211,6 +213,33 @@ def voice_handler(audio: tuple[int, np.ndarray]):
                 print(f"📚 KB result found: {result.get('found', False)}")
                 speech_text = result["speech"]
                 session_state["last_bot_text"] = speech_text
+            
+            # Handle get_invoice tool (multi-turn)
+            elif tool_data.get("name") == "get_invoice":
+                action = tool_data.get("args", {}).get("action", "initiate")
+                print(f"🧾 INVOICE TOOL TRIGGERED: action={action}")
+                
+                if action == "initiate":
+                    result = invoice_tool.initiate()
+                elif action == "provide_id":
+                    driver_id = tool_data.get("args", {}).get("driver_id", "")
+                    result = invoice_tool.receive_id(driver_id)
+                elif action == "confirm":
+                    confirmed = tool_data.get("args", {}).get("confirmed", False)
+                    result = invoice_tool.confirm(confirmed)
+                elif action == "get_penalty":
+                    result = invoice_tool.get_penalty_details()
+                elif action == "get_swaps":
+                    result = invoice_tool.get_swap_details()
+                elif action == "get_summary":
+                    result = invoice_tool.get_summary()
+                else:
+                    result = {"speech": "Maaf kijiye, kuch problem hai. Kya aap phir se try karenge?"}
+                
+                print(f"🧾 Invoice result: state={result.get('state', 'unknown')}, action={result.get('action', 'unknown')}")
+                speech_text = result["speech"]
+                session_state["last_bot_text"] = speech_text
+                session_state["invoice_data"] = result
         
         except Exception as e:
             print(f"❌ TOOL ERROR: {e}")
