@@ -12,40 +12,55 @@ export const SWAP_STATIONS = [
 // Default location (Delhi center) - used as fallback
 export const DEFAULT_LOCATION = { lat: 28.6139, lng: 77.2090 };
 
-// Map configuration
-export const MAP_CONFIG = {
+// Google Maps configuration
+export const GOOGLE_MAPS_CONFIG = {
+  apiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
   defaultZoom: 14,
   maxZoom: 19,
-  tileLayerUrl: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  libraries: ['places', 'geometry'],
+  mapId: 'battery-smart-map', // Optional: for advanced markers
 };
 
-// OSRM API configuration
-export const OSRM_CONFIG = {
-  baseUrl: 'https://router.project-osrm.org/route/v1/driving',
-  profile: 'driving',
-};
-
-// Leaflet CDN URLs
-export const LEAFLET_CDN = {
-  css: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css',
-  cssIntegrity: 'sha512-Zcn6bjR/8RZbLEpLIeOwNtzREBAJnUKESxces60Mpoj+2okopSAcSUIUOseddDm0cxnGQzxIR7vJgsLZbdLE3w==',
-  markerIcon: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  markerIcon2x: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  markerShadow: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-};
+// Map styling - dark mode friendly, clean look
+export const MAP_STYLES = [
+  {
+    featureType: 'poi',
+    elementType: 'labels',
+    stylers: [{ visibility: 'off' }],
+  },
+  {
+    featureType: 'transit',
+    elementType: 'labels',
+    stylers: [{ visibility: 'off' }],
+  },
+];
 
 // Route styling
 export const ROUTE_STYLES = {
   selected: {
-    color: '#22c55e',
-    weight: 5,
-    opacity: 0.9,
+    strokeColor: '#22c55e',
+    strokeWeight: 5,
+    strokeOpacity: 0.9,
   },
   fallback: {
-    color: '#22c55e',
-    weight: 4,
-    dashArray: '10, 10',
-    opacity: 0.8,
+    strokeColor: '#22c55e',
+    strokeWeight: 4,
+    strokeOpacity: 0.8,
+    icons: [{
+      icon: {
+        path: 'M 0,-1 0,1',
+        strokeOpacity: 1,
+        scale: 4,
+      },
+      offset: '0',
+      repeat: '20px',
+    }],
   },
+};
+
+// Marker colors
+export const MARKER_COLORS = {
+  user: '#3b82f6',
+  nearestStation: '#22c55e',
+  station: '#16a34a',
 };

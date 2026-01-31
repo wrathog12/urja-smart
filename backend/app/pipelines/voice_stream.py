@@ -20,16 +20,24 @@ from backend.app.services.llm import llm_service
 from backend.app.services.tts import tts_service
 from backend.app.tools.handoff import handoff_guard
 from backend.app.tools.end_call import end_call_tool
-from backend.app.core.prompts import ESCALATION_MESSAGE, END_CALL_MESSAGE
+from backend.app.tools.battery import station_tool
+from backend.app.tools.knowledge_base import knowledge_tool
+from backend.app.core.prompts import ESCALATION_MESSAGE, END_CALL_MESSAGE, SALES_PITCH
 
 # --- Configuration ---
 MIN_CONFIDENCE_THRESHOLD = 0.70  # Reject transcriptions below 70% confidence
 MIN_TEXT_LENGTH = 3  # Reject very short transcriptions (likely noise)
 ESCALATION_SENTIMENT_THRESHOLD = 0.3  # Auto-escalate if sentiment drops below this
 
+# --- Barge-In Configuration ---
+MIN_AUDIO_ENERGY = 800       # Minimum energy to even consider audio
+BARGE_IN_ENERGY = 1500       # Higher threshold for interrupting during TTS
+BARGE_IN_CHUNKS_REQUIRED = 3 # Must sustain for 3 chunks (~1.5 sec) to interrupt
+
 # --- Global Session State (accessible from main.py) ---
 session_state = {
     "is_active": False,
+    "is_speaking": False,  # True while TTS is playing
     "should_end": False,
     "end_reason": None,
     "last_user_text": "",
@@ -37,7 +45,10 @@ session_state = {
     "last_tool": None,
     "last_sentiment": 0.7,
     "sentiment_history": [],
-    "metrics": {"stt": 0, "llm": 0, "tts": 0}
+    "metrics": {"stt": 0, "llm": 0, "tts": 0},
+    "service_resolved": False,
+    "pitch_offered": False,
+    "barge_in_counter": 0  # Track consecutive high-energy chunks for barge-in
 }
 
 # --- Chat History (keeps last 5 turns for context) ---
@@ -52,6 +63,7 @@ def reset_session():
     handoff_guard.strike_count = 0
     session_state.update({
         "is_active": False,
+        "is_speaking": False,
         "should_end": False,
         "end_reason": None,
         "last_user_text": "",
@@ -59,7 +71,10 @@ def reset_session():
         "last_tool": None,
         "last_sentiment": 0.7,
         "sentiment_history": [],
-        "metrics": {"stt": 0, "llm": 0, "tts": 0}
+        "metrics": {"stt": 0, "llm": 0, "tts": 0},
+        "service_resolved": False,
+        "pitch_offered": False,
+        "barge_in_counter": 0
     })
 
 
@@ -75,6 +90,16 @@ def voice_handler(audio: tuple[int, np.ndarray]):
     
     session_state["is_active"] = True
     start_time = time.perf_counter()
+    
+    # --- AUDIO ENERGY GATE: Reject quiet background noise ---
+    sample_rate, audio_data = audio
+    audio_energy = np.abs(audio_data).mean()
+    
+    if audio_energy < MIN_AUDIO_ENERGY:
+        print(f"🔇 Rejected: Audio too quiet (energy: {audio_energy:.0f} < {MIN_AUDIO_ENERGY})")
+        return
+    
+    print(f"🎙️ Audio accepted (energy: {audio_energy:.0f})")
 
     # 1. THE EARS (STT - Deepgram)
     user_text, confidence = stt_service.stt(audio)
@@ -158,12 +183,40 @@ def voice_handler(audio: tuple[int, np.ndarray]):
         tool_display = json.dumps(tool_data, indent=2)
         session_state["last_tool"] = tool_data
         
-        # Handle end_call tool
-        if tool_data.get("name") == "end_call":
-            print("📞 END CALL TRIGGERED")
-            result = end_call_tool.execute(tool_data.get("args", {}))
-            session_state["should_end"] = True
-            session_state["end_reason"] = tool_data.get("args", {}).get("reason", "user_requested")
+        try:
+            # Handle end_call tool
+            if tool_data.get("name") == "end_call":
+                print("📞 END CALL TRIGGERED")
+                result = end_call_tool.execute(tool_data.get("args", {}))
+                session_state["should_end"] = True
+                session_state["end_reason"] = tool_data.get("args", {}).get("reason", "user_requested")
+            
+            # Handle get_nearest_station tool
+            elif tool_data.get("name") == "get_nearest_station":
+                print("📍 NEAREST STATION TOOL TRIGGERED")
+                result = station_tool.find_nearest_stations()
+                print(f"📍 Station tool result: {result.get('best_station', {}).get('name', 'No station')}")
+                # Replace LLM placeholder with actual station data response
+                speech_text = result["speech"]
+                print(f"📍 New speech_text: {speech_text[:100]}...")
+                session_state["last_bot_text"] = speech_text
+                session_state["station_data"] = result
+                session_state["service_resolved"] = True
+            
+            # Handle search_knowledge_base tool
+            elif tool_data.get("name") == "search_knowledge_base":
+                query = tool_data.get("args", {}).get("query", "")
+                print(f"📚 KNOWLEDGE BASE TOOL TRIGGERED: {query}")
+                result = knowledge_tool.search(query)
+                print(f"📚 KB result found: {result.get('found', False)}")
+                speech_text = result["speech"]
+                session_state["last_bot_text"] = speech_text
+        
+        except Exception as e:
+            print(f"❌ TOOL ERROR: {e}")
+            speech_text = "Maaf kijiye, mujhe kuch technical problem aa rahi hai. Kya aap phir se bata sakte hain?"
+    
+    print(f"🔄 Flow check: After tools, before escalation. speech_text length: {len(speech_text)}")
 
     # 5. CHECK FOR AUTO-ESCALATION (Low Sentiment)
     if sentiment_score <= ESCALATION_SENTIMENT_THRESHOLD and not (tool_data and tool_data.get("name") == "escalate_to_agent"):
@@ -198,7 +251,9 @@ def voice_handler(audio: tuple[int, np.ndarray]):
     )
 
     # 7. THE MOUTH (TTS - Cartesia)
+    print(f"🔊 About to speak: '{speech_text[:50]}...'")
     print("🔊 Speaking...")
+    session_state["is_speaking"] = True  # Lock to prevent barge-in
     t_tts_start = time.perf_counter()
     
     for i, audio_chunk in enumerate(tts_service.generate_audio(speech_text)):
@@ -218,6 +273,7 @@ def voice_handler(audio: tuple[int, np.ndarray]):
         
         yield audio_chunk
     
+    session_state["is_speaking"] = False  # Unlock after TTS completes
     print("✅ Response Complete\n")
     
     # If call should end
@@ -236,9 +292,12 @@ def handle_additional_outputs(
 
 
 # --- THE STREAM OBJECT ---
+# NOTE: can_interrupt=False means no barge-in. This is intentional for stability.
+# FastRTC's interrupt mechanism kills the generator before our code can handle it.
 voice_stream = Stream(
     ReplyOnPause(
-        voice_handler
+        voice_handler,
+        can_interrupt=False  # STABLE: Bot finishes speaking before processing new input
     ),
     modality="audio",
     mode="send-receive",

@@ -1,29 +1,37 @@
-import { OSRM_CONFIG } from '../constants';
-
 /**
- * Fetch road distance and duration using OSRM (Open Source Routing Machine) API
+ * Fetch road distance and duration using Google Maps Directions API
  */
-export async function getRouteInfo(originLat, originLng, destLat, destLng) {
-  try {
-    // OSRM expects coordinates in lng,lat format
-    const url = `${OSRM_CONFIG.baseUrl}/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=geojson`;
-    
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-      const route = data.routes[0];
-      return {
-        distance: route.distance / 1000, // Convert meters to kilometers
-        duration: route.duration / 60, // Convert seconds to minutes
-        geometry: route.geometry, // Route geometry for drawing on map
-      };
+export async function getRouteInfo(originLat, originLng, destLat, destLng, directionsService) {
+  return new Promise((resolve) => {
+    if (!directionsService) {
+      resolve(null);
+      return;
     }
-    return null;
-  } catch (error) {
-    console.error('Error fetching route:', error);
-    return null;
-  }
+
+    directionsService.route(
+      {
+        origin: { lat: originLat, lng: originLng },
+        destination: { lat: destLat, lng: destLng },
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === 'OK' && result.routes && result.routes.length > 0) {
+          const route = result.routes[0];
+          const leg = route.legs[0];
+          
+          resolve({
+            distance: leg.distance.value / 1000, // Convert meters to kilometers
+            duration: leg.duration.value / 60, // Convert seconds to minutes
+            path: route.overview_path, // Array of LatLng points for drawing polyline
+            directions: result, // Full directions result for DirectionsRenderer
+          });
+        } else {
+          console.error('Directions request failed:', status);
+          resolve(null);
+        }
+      }
+    );
+  });
 }
 
 /**
@@ -39,4 +47,36 @@ export function calculateStraightLineDistance(lat1, lon1, lat2, lon2) {
     Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return R * c; // Distance in kilometers
+}
+
+/**
+ * Get route info using Distance Matrix API (for bulk distance calculations)
+ */
+export async function getDistanceMatrix(origin, destinations, distanceMatrixService) {
+  return new Promise((resolve) => {
+    if (!distanceMatrixService) {
+      resolve(null);
+      return;
+    }
+
+    distanceMatrixService.getDistanceMatrix(
+      {
+        origins: [origin],
+        destinations: destinations,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+        drivingOptions: {
+          departureTime: new Date(), // Required for traffic-aware duration
+          trafficModel: 'bestguess', // Options: 'bestguess', 'pessimistic', 'optimistic'
+        },
+      },
+      (response, status) => {
+        if (status === 'OK') {
+          resolve(response.rows[0].elements);
+        } else {
+          console.error('Distance Matrix request failed:', status);
+          resolve(null);
+        }
+      }
+    );
+  });
 }
