@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import gradio as gr
 
 # Import the configured stream from voice_stream pipeline
-from backend.app.pipelines.voice_stream import voice_stream, session_state, reset_session
+from backend.app.pipelines.voice_stream import voice_stream, session_state, reset_session, get_conversation_history
 from backend.app.services.tts import tts_service
 
 # --- Pydantic Models ---
@@ -107,6 +107,91 @@ async def end_session_endpoint():
     session_state["end_reason"] = "manual_stop"
     session_state["is_active"] = False
     return {"success": True, "message": "Session ended"}
+
+@app.get("/api/session/history")
+async def get_session_history():
+    """
+    Get full conversation history with confidence scores for escalation.
+    Returns:
+        - history: List of {sender, text, confidence, timestamp, tool}
+        - summary: Auto-generated summary of conversation
+        - stats: {totalTurns, avgConfidence, lowConfidenceCount}
+        - metrics: {stt, llm, tts} latencies
+    """
+    history = get_conversation_history()
+    
+    # Calculate stats
+    user_messages = [m for m in history if m.get("sender") == "user"]
+    confidence_scores = [m.get("confidence", 0) for m in user_messages if m.get("confidence") is not None]
+    
+    avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else None
+    low_confidence_count = len([c for c in confidence_scores if c < 0.7])
+    
+    # Generate summary
+    summary = generate_summary(history)
+    
+    return {
+        "history": history,
+        "summary": summary,
+        "stats": {
+            "totalTurns": len(history),
+            "userMessages": len(user_messages),
+            "botMessages": len([m for m in history if m.get("sender") == "bot"]),
+            "avgConfidence": avg_confidence,
+            "lowConfidenceCount": low_confidence_count
+        },
+        "metrics": session_state.get("metrics", {}),
+        "sentiment_history": session_state.get("sentiment_history", []),
+        "customerPhone": session_state.get("customer_phone"),
+        "customerName": session_state.get("customer_name")
+    }
+
+class CustomerInfoRequest(BaseModel):
+    phone: str = None
+    name: str = None
+
+@app.post("/api/session/customer-info")
+async def set_customer_info(request: CustomerInfoRequest):
+    """
+    Set customer phone number and name for callback.
+    Can be called from frontend when user provides their number.
+    """
+    if request.phone:
+        session_state["customer_phone"] = request.phone
+    if request.name:
+        session_state["customer_name"] = request.name
+    return {"success": True, "phone": request.phone, "name": request.name}
+
+def generate_summary(history: list) -> str:
+    """Generate a quick summary from conversation history."""
+    if not history:
+        return "No conversation history available."
+    
+    user_messages = [m.get("text", "") for m in history if m.get("sender") == "user"]
+    
+    if not user_messages:
+        return "No user messages recorded."
+    
+    # Extract keywords for topics
+    keywords = []
+    keyword_patterns = [
+        ("invoice|bill|payment|paisa", "Invoice/Payment"),
+        ("battery|swap|charge", "Battery/Swap"),
+        ("station|location|nearest", "Station Location"),
+        ("problem|issue|help|complaint", "Support Issue"),
+        ("penalty|fine|late", "Penalty Inquiry"),
+    ]
+    
+    all_text = " ".join(user_messages).lower()
+    import re
+    for pattern, topic in keyword_patterns:
+        if re.search(pattern, all_text, re.IGNORECASE):
+            keywords.append(topic)
+    
+    topics_str = ", ".join(keywords) if keywords else "General inquiry"
+    last_message = user_messages[-1][:100] + ("..." if len(user_messages[-1]) > 100 else "")
+    
+    return f"Customer discussed: {topics_str}. Last message: \"{last_message}\""
 
 # --- Mount FastRTC Stream ---
 # This exposes the WebRTC endpoints for audio streaming

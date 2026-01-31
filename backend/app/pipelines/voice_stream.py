@@ -12,6 +12,7 @@ import time
 import json
 import numpy as np
 import gradio as gr
+from datetime import datetime
 from fastrtc import Stream, AdditionalOutputs, ReplyOnPause
 
 # Import the specific service INSTANCES (singleton objects)
@@ -49,17 +50,23 @@ session_state = {
     "metrics": {"stt": 0, "llm": 0, "tts": 0},
     "service_resolved": False,
     "pitch_offered": False,
-    "barge_in_counter": 0  # Track consecutive high-energy chunks for barge-in
+    "barge_in_counter": 0,  # Track consecutive high-energy chunks for barge-in
+    "customer_phone": None,  # Customer phone number for callback
+    "customer_name": None    # Customer name if collected
 }
 
 # --- Chat History (keeps last 5 turns for context) ---
 chat_history = []
 
+# --- Full Conversation History (for escalation with metadata) ---
+conversation_history = []  # Stores {sender, text, confidence, timestamp, tool}
+
 
 def reset_session():
     """Reset session state for new conversation."""
-    global chat_history, session_state
+    global chat_history, session_state, conversation_history
     chat_history = []
+    conversation_history = []  # Reset full history too
     end_call_tool.reset()
     invoice_tool.reset()
     handoff_guard.strike_count = 0
@@ -76,8 +83,16 @@ def reset_session():
         "metrics": {"stt": 0, "llm": 0, "tts": 0},
         "service_resolved": False,
         "pitch_offered": False,
-        "barge_in_counter": 0
+        "barge_in_counter": 0,
+        "customer_phone": None,
+        "customer_name": None
     })
+
+
+def get_conversation_history():
+    """Get full conversation history for escalation display."""
+    global conversation_history
+    return conversation_history
 
 
 def voice_handler(audio: tuple[int, np.ndarray]):
@@ -143,20 +158,47 @@ def voice_handler(audio: tuple[int, np.ndarray]):
     print(f"📝 Transcript: {user_text} (confidence: {confidence:.2f})")
     session_state["last_user_text"] = user_text
     
+    # Record user message in full conversation history (for escalation)
+    conversation_history.append({
+        "sender": "user",
+        "text": user_text,
+        "confidence": confidence,
+        "timestamp": datetime.now().isoformat(),
+        "tool": None
+    })
+    
     # 2. THE GUARD (Handoff Logic - Check for repeated low confidence)
     should_escalate = handoff_guard.check_and_update(confidence)
     
     if should_escalate:
-        print("🚨 GUARD TRIGGERED HANDOFF")
+        print("🚨 GUARD TRIGGERED HANDOFF - LOW AUDIO QUALITY")
         handoff_msg = handoff_guard.get_escalation_message()
         
-        yield AdditionalOutputs(user_text, "[HANDOFF]", "{}", "🚨 Escalating")
+        # Record escalation message in conversation history
+        conversation_history.append({
+            "sender": "bot",
+            "text": handoff_msg,
+            "confidence": None,
+            "timestamp": datetime.now().isoformat(),
+            "tool": "escalate_to_agent",
+            "sentiment": None
+        })
+        
+        # Send proper tool JSON so frontend can trigger escalation
+        escalation_tool = json.dumps({
+            "name": "escalate_to_agent",
+            "args": {"reason": "audio_quality_escalation"}
+        })
+        
+        yield AdditionalOutputs(user_text, handoff_msg, escalation_tool, "🚨 Escalating - Audio Quality")
         
         for audio_chunk in tts_service.generate_audio(handoff_msg):
             yield audio_chunk
         
         session_state["should_end"] = True
         session_state["end_reason"] = "audio_quality_escalation"
+        session_state["is_active"] = False
+        print("🚨 Bot stopped - Audio quality escalation complete")
         return
 
     # 3. UPDATE MEMORY (keep last 5 turns = 10 messages)
@@ -180,9 +222,11 @@ def voice_handler(audio: tuple[int, np.ndarray]):
     
     # Format tool data for display
     tool_display = "None"
+    tool_name = None
     if tool_data:
         print(f"🔧 Tool Trigger: {tool_data['name']}")
         tool_display = json.dumps(tool_data, indent=2)
+        tool_name = tool_data.get("name")
         session_state["last_tool"] = tool_data
         
         try:
@@ -240,6 +284,39 @@ def voice_handler(audio: tuple[int, np.ndarray]):
                 speech_text = result["speech"]
                 session_state["last_bot_text"] = speech_text
                 session_state["invoice_data"] = result
+            
+            # Handle escalate_to_agent tool - STOP BOT IMMEDIATELY
+            elif tool_data.get("name") == "escalate_to_agent":
+                escalation_reason = tool_data.get("args", {}).get("reason", "agent_requested")
+                print(f"🚨 ESCALATION TRIGGERED: {escalation_reason}")
+                
+                # Record bot message for escalation
+                conversation_history.append({
+                    "sender": "bot",
+                    "text": speech_text,
+                    "confidence": None,
+                    "timestamp": datetime.now().isoformat(),
+                    "tool": "escalate_to_agent",
+                    "sentiment": sentiment_score
+                })
+                
+                # Send the escalation message via TTS, then stop
+                yield AdditionalOutputs(
+                    f"🗣️ {user_text}",
+                    f"🤖 {speech_text}",
+                    tool_display,
+                    f"🚨 Escalating: {escalation_reason}"
+                )
+                
+                for audio_chunk in tts_service.generate_audio(speech_text):
+                    yield audio_chunk
+                
+                # Mark session as ended due to escalation
+                session_state["should_end"] = True
+                session_state["end_reason"] = f"escalation_{escalation_reason}"
+                session_state["is_active"] = False
+                print("🚨 Bot stopped - Escalation complete")
+                return  # EXIT IMMEDIATELY - Don't continue processing
         
         except Exception as e:
             print(f"❌ TOOL ERROR: {e}")
@@ -250,6 +327,16 @@ def voice_handler(audio: tuple[int, np.ndarray]):
     # 5. CHECK FOR AUTO-ESCALATION (Low Sentiment)
     if sentiment_score <= ESCALATION_SENTIMENT_THRESHOLD and not (tool_data and tool_data.get("name") == "escalate_to_agent"):
         print(f"😠 LOW SENTIMENT ({sentiment_score}) - Auto-escalating")
+        
+        # Record escalation message in conversation history
+        conversation_history.append({
+            "sender": "bot",
+            "text": ESCALATION_MESSAGE,
+            "confidence": None,
+            "timestamp": datetime.now().isoformat(),
+            "tool": "escalate_to_agent",
+            "sentiment": sentiment_score
+        })
         
         yield AdditionalOutputs(
             f"🗣️ {user_text}",
@@ -263,10 +350,22 @@ def voice_handler(audio: tuple[int, np.ndarray]):
         
         session_state["should_end"] = True
         session_state["end_reason"] = "sentiment_escalation"
+        session_state["is_active"] = False
+        print("🚨 Bot stopped - Low sentiment escalation complete")
         return
 
     # Update memory with bot's reply
     chat_history.append({"role": "assistant", "content": speech_text})
+    
+    # Record bot message in full conversation history (for escalation)
+    conversation_history.append({
+        "sender": "bot",
+        "text": speech_text,
+        "confidence": None,  # Bot messages don't have confidence
+        "timestamp": datetime.now().isoformat(),
+        "tool": tool_name,
+        "sentiment": sentiment_score
+    })
 
     # 6. UI UPDATE
     sentiment_emoji = "😊" if sentiment_score >= 0.7 else "😐" if sentiment_score >= 0.5 else "😟"

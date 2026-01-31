@@ -21,12 +21,12 @@ function createSession(id, sessionType, ws) {
     type: sessionType,
     startTime: new Date().toISOString(),
     audioChunks: [],
-    chatHistory: [] // Track conversation for escalation
+    chatHistory: [], // Track conversation for escalation
   };
-  
+
   activeSessions.set(id, session);
   sessionClients.set(id, ws);
-  
+
   return session;
 }
 
@@ -104,14 +104,16 @@ function getAndClearAudioChunks(sessionId) {
 /**
  * Add a message to session's chat history
  * @param {string} sessionId - Session ID
- * @param {Object} message - Message object { sender, text, timestamp }
+ * @param {Object} message - Message object { sender, text, timestamp, confidence?, tool? }
  */
 function addChatMessage(sessionId, message) {
   const session = activeSessions.get(sessionId);
   if (session) {
     session.chatHistory.push({
       ...message,
-      timestamp: message.timestamp || new Date().toISOString()
+      timestamp: message.timestamp || new Date().toISOString(),
+      confidence: message.confidence || null, // STT confidence score (0-1)
+      tool: message.tool || null, // Tool used in this turn
     });
   }
 }
@@ -136,5 +138,5 @@ module.exports = {
   addAudioChunk,
   getAndClearAudioChunks,
   addChatMessage,
-  getSessionHistory
+  getSessionHistory,
 };
