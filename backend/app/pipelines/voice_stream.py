@@ -55,8 +55,34 @@ session_state = {
     "pitch_offered": False,
     "barge_in_counter": 0,  # Track consecutive high-energy chunks for barge-in
     "customer_phone": None,  # Customer phone number for callback
-    "customer_name": None    # Customer name if collected
+    "customer_name": None,   # Customer name if collected
+    "user_language": None    # Detected language: 'english' or 'hindi' - LOCKED after first message
 }
+
+# --- Language Detection ---
+def detect_language(text: str) -> str:
+    """Detect if text is Hindi/Hinglish or English. Returns 'hindi' or 'english'."""
+    # Hindi indicators (romanized and Devanagari patterns)
+    hindi_words = [
+        'kya', 'hai', 'hain', 'kaise', 'kahan', 'kitna', 'kaun', 'kab', 'kyun',
+        'mera', 'meri', 'mere', 'aap', 'aapka', 'aapki', 'hum', 'humara',
+        'yeh', 'woh', 'kis', 'batao', 'bataiye', 'dikhao', 'chahiye', 'milega',
+        'hoga', 'tha', 'thi', 'kar', 'karo', 'karein', 'ho', 'hoon',
+        'ji', 'nahi', 'haan', 'theek', 'accha', 'sahi', 'galat',
+        'paisa', 'rupees', 'rupaye', 'battery', 'station', 'swap',
+        'namaste', 'dhanyavaad', 'shukriya', 'alvida', 'please'
+    ]
+    
+    # Check for Devanagari script (Unicode range)
+    devanagari_count = sum(1 for char in text if '\u0900' <= char <= '\u097F')
+    if devanagari_count >= 2:
+        return 'hindi'
+    
+    # Check for romanized Hindi words
+    text_lower = text.lower()
+    hindi_count = sum(1 for word in hindi_words if word in text_lower)
+    
+    return 'hindi' if hindi_count >= 2 else 'english'
 
 # --- Chat History (keeps last 5 turns for context) ---
 chat_history = []
@@ -88,7 +114,8 @@ def reset_session():
         "pitch_offered": False,
         "barge_in_counter": 0,
         "customer_phone": None,
-        "customer_name": None
+        "customer_name": None,
+        "user_language": None  # Reset language detection
     })
 
 
@@ -209,19 +236,34 @@ def voice_handler(audio: tuple[int, np.ndarray]):
     if len(chat_history) > 10:
         chat_history = chat_history[-10:]
     
+    # 3.3 LANGUAGE DETECTION (detect once, lock for entire conversation)
+    if session_state["user_language"] is None:
+        detected_lang = detect_language(user_text)
+        session_state["user_language"] = detected_lang
+        print(f"🌐 Language detected: {detected_lang.upper()} - LOCKED for this conversation")
+    
     # 3.5 INJECT TOOL STATE CONTEXT (helps LLM understand current step)
     context_messages = []
+    
+    # MANDATORY LANGUAGE INSTRUCTION (always first)
+    lang = session_state["user_language"]
+    if lang == "english":
+        context_messages.append({"role": "system", "content": "MANDATORY: User speaks ENGLISH. You MUST reply ONLY in English. NO Hindi words at all. This is non-negotiable."})
+    else:
+        context_messages.append({"role": "system", "content": "MANDATORY: User speaks HINDI/HINGLISH. You MUST reply ONLY in Hindi/Hinglish (romanized). NO English sentences. This is non-negotiable."})
+    
+    # Invoice tool context
     if invoice_tool.state == "awaiting_id":
         context_messages.append({"role": "system", "content": "CONTEXT: Invoice flow active. Waiting for user to provide Driver ID."})
     elif invoice_tool.state == "confirming":
-        context_messages.append({"role": "system", "content": f"CONTEXT: Invoice flow active. Waiting for user to CONFIRM Driver ID '{invoice_tool.driver_id}'. If user says yes/haan/sahi, use action='confirm' with confirmed=true."})
+        context_messages.append({"role": "system", "content": f"CONTEXT: Invoice flow active. Waiting for user to CONFIRM Driver ID '{invoice_tool.pending_driver_id}'. If user says yes/haan/sahi, use action='confirm' with confirmed=true."})
     elif invoice_tool.state == "confirmed":
         context_messages.append({"role": "system", "content": "CONTEXT: Invoice confirmed. User may ask for penalty, swaps, or summary."})
     
     # 4. THE BRAIN (LLM - Groq/Llama)
     print("🧠 Thinking...")
-    # Pass chat history with context if available
-    messages_for_llm = chat_history + context_messages if context_messages else chat_history
+    # Pass chat history with context (language instruction ALWAYS injected)
+    messages_for_llm = chat_history + context_messages
     speech_text, tool_data, sentiment_score = llm_service.get_response(messages_for_llm)
     
     t_llm = time.perf_counter()
@@ -244,12 +286,32 @@ def voice_handler(audio: tuple[int, np.ndarray]):
         session_state["last_tool"] = tool_data
         
         try:
-            # Handle end_call tool
+            # Handle end_call tool - ENSURE TTS FINISHES BEFORE ENDING
             if tool_data.get("name") == "end_call":
                 print("📞 END CALL TRIGGERED")
                 result = end_call_tool.execute(tool_data.get("args", {}))
+                
+                # Send UI update first
+                yield AdditionalOutputs(
+                    f"🗣️ {user_text}",
+                    f"🤖 {speech_text}",
+                    tool_display,
+                    "📞 Call ending..."
+                )
+                
+                # Speak the goodbye message BEFORE ending
+                for audio_chunk in tts_service.generate_audio(speech_text):
+                    yield audio_chunk
+                
+                # Small delay to ensure TTS audio is fully played
+                import asyncio
+                time.sleep(3)  # 3 second delay to let TTS finish
+                
                 session_state["should_end"] = True
                 session_state["end_reason"] = tool_data.get("args", {}).get("reason", "user_requested")
+                session_state["is_active"] = False
+                print("📞 Call ended - TTS complete")
+                return  # Exit after end_call
             
             # Handle get_nearest_station tool
             elif tool_data.get("name") == "get_nearest_station":
@@ -266,8 +328,9 @@ def voice_handler(audio: tuple[int, np.ndarray]):
             # Handle search_knowledge_base tool
             elif tool_data.get("name") == "search_knowledge_base":
                 query = tool_data.get("args", {}).get("query", "")
-                print(f"📚 KNOWLEDGE BASE TOOL TRIGGERED: {query}")
-                result = knowledge_tool.search(query)
+                user_lang = session_state.get("user_language", "english")
+                print(f"📚 KNOWLEDGE BASE TOOL TRIGGERED: {query} (lang: {user_lang})")
+                result = knowledge_tool.search(query, language=user_lang)
                 print(f"📚 KB result found: {result.get('found', False)}")
                 speech_text = result["speech"]
                 session_state["last_bot_text"] = speech_text
