@@ -220,12 +220,12 @@ def voice_handler(audio: tuple[int, np.ndarray]):
     session_state["last_sentiment"] = sentiment_score
     session_state["sentiment_history"].append(sentiment_score)
     
-    # Format tool data for display
+    # Format tool data for display (compact JSON for frontend parsing)
     tool_display = "None"
     tool_name = None
     if tool_data:
         print(f"🔧 Tool Trigger: {tool_data['name']}")
-        tool_display = json.dumps(tool_data, indent=2)
+        tool_display = json.dumps(tool_data)  # Compact JSON for frontend
         tool_name = tool_data.get("name")
         session_state["last_tool"] = tool_data
         
@@ -257,6 +257,22 @@ def voice_handler(audio: tuple[int, np.ndarray]):
                 print(f"📚 KB result found: {result.get('found', False)}")
                 speech_text = result["speech"]
                 session_state["last_bot_text"] = speech_text
+            
+            # Handle show_directions tool - triggers map popup on frontend
+            elif tool_data.get("name") == "show_directions":
+                print("🗺️ SHOW DIRECTIONS TOOL TRIGGERED")
+                # Get the best station from session state (set by get_nearest_station)
+                station_data = session_state.get("station_data", {})
+                best_station = station_data.get("best_station")
+                
+                if best_station:
+                    speech_text = f"Main aapko {best_station.get('name', 'station').split(' - ')[-1]} ka raasta dikha rahi hu. Map open ho raha hai."
+                else:
+                    speech_text = "Ek second, main aapko map dikha rahi hu jisme saare stations hain."
+                
+                session_state["last_bot_text"] = speech_text
+                session_state["show_map_popup"] = True  # Flag for frontend
+                print(f"🗺️ Speech: {speech_text}")
             
             # Handle get_invoice tool (multi-turn)
             elif tool_data.get("name") == "get_invoice":

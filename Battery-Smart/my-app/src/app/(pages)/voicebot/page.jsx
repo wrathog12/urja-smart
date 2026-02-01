@@ -1,11 +1,17 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import VoiceAgent from "./components/voice-agent";
 import { useRedirectPopup } from "@/context/RedirectPopupContext";
 import { voiceSocket } from "./services/voiceSocket";
+import {
+  initializeStationData,
+  resetStationDataCache,
+} from "./services/stationService";
 
-const BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 export default function HomePage() {
   // Bot states: 'idle' | 'connecting' | 'listening' | 'processing' | 'speaking'
@@ -22,6 +28,7 @@ export default function HomePage() {
   const voiceAgentRef = useRef(null);
   const speakingIntervalRef = useRef(null);
   const { showPopup } = useRedirectPopup();
+  const router = useRouter();
 
   // Cleanup function
   const cleanup = useCallback(async () => {
@@ -107,13 +114,25 @@ export default function HomePage() {
           voiceSocket.disconnect();
         }, 2000);
       }
+
+      // Handle show_directions tool - redirect to maps page
+      if (tool?.name === "show_directions") {
+        console.log("🗺️ SHOW DIRECTIONS TOOL DETECTED - redirecting to maps");
+        // Redirect to maps page after a short delay (let audio play first)
+        setTimeout(() => {
+          console.log("🗺️ Redirecting to /maps");
+          router.push("/maps");
+        }, 1500);
+      }
     });
 
     // Call end handler
     voiceSocket.onCallEnd((reason) => {
       console.log("📞 Call ended:", reason);
       if (reason === "issue_resolved") {
-        showPopup("feedback");
+        if (showPopupRef.current) {
+          showPopupRef.current("feedback");
+        }
       }
       // Delay cleanup to let final audio play
       setTimeout(() => {
@@ -132,7 +151,28 @@ export default function HomePage() {
     return () => {
       cleanup();
     };
-  }, [cleanup, showPopup]);
+  }, [cleanup]);
+
+  // Initialize station data on page load (single call, cached)
+  useEffect(() => {
+    console.log("🗺️ Initializing station data...");
+    initializeStationData()
+      .then((result) => {
+        if (result.success) {
+          console.log(`✅ Station data ready: ${result.stationCount} stations`);
+        } else {
+          console.warn("⚠️ Station data init failed:", result.error);
+        }
+      })
+      .catch((error) => {
+        console.error("❌ Station data init error:", error);
+      });
+
+    // Reset cache when leaving the page
+    return () => {
+      resetStationDataCache();
+    };
+  }, []);
 
   // Simulate speaking intensity when bot is speaking
   useEffect(() => {

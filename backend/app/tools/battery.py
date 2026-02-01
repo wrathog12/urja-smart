@@ -1,119 +1,118 @@
 """
 Battery Smart Station Tool
 Handles finding nearest battery swap stations based on location and availability.
+
+USES ONLY CACHED DATA FROM FRONTEND - No hardcoded station data.
+Frontend sends station data with ETA/traffic on page load via POST /api/station-data
+
+- Nearest = Based on distance (km)
+- Best = Based on ETA (traffic-aware travel time)
 """
-import math
 import logging
 
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# STATIC STATION DATA (from frontend constants/index.js)
-# ============================================================================
-SWAP_STATIONS = [
-    {"id": 1, "name": "Battery Smart Hub - Central", "lat": 28.4270, "lng": 77.1105, "batteries": 12},
-    {"id": 2, "name": "Battery Smart Station - North", "lat": 28.4248, "lng": 77.0989, "batteries": 8},
-    {"id": 3, "name": "Battery Smart Point - East", "lat": 28.4234, "lng": 77.1051, "batteries": 15},
-    {"id": 4, "name": "Battery Smart Depot - South", "lat": 28.4719, "lng": 77.0725, "batteries": 6},
-    {"id": 5, "name": "Battery Smart Express - West", "lat": 28.4593, "lng": 77.0727, "batteries": 10},
-    {"id": 6, "name": "Battery Smart Quick Swap", "lat": 28.4813, "lng": 77.0930, "batteries": 20},
-    {"id": 7, "name": "Battery Smart Headquarter", "lat": 28.4149, "lng": 77.0883, "batteries": 12},
-]
-
-# Default user location (Gurgaon area) - for testing
-DEFAULT_USER_LOCATION = {"lat": 28.4595, "lng": 77.0266}
-
-
-def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    """
-    Calculate the great-circle distance between two points using Haversine formula.
-    Returns distance in kilometers.
-    """
-    R = 6371  # Earth's radius in kilometers
-    
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
-    
-    a = (math.sin(d_lat / 2) ** 2 + 
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
-         math.sin(d_lng / 2) ** 2)
-    
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    
-    return R * c
-
 
 class NearestStationTool:
     """
-    Tool to find nearest battery swap stations based on location and availability.
+    Tool to find nearest and best battery swap stations.
+    Uses cached data from frontend (no hardcoded stations).
+    
+    - Nearest = Based on distance (km)
+    - Best = Based on ETA (traffic-aware travel time)
     """
     
-    def __init__(self):
-        self.stations = SWAP_STATIONS
-        self.default_location = DEFAULT_USER_LOCATION
+    def _get_cached_data(self):
+        """Get cached station data from the API module."""
+        try:
+            from backend.app.api.station_data import get_cached_stations
+            return get_cached_stations()
+        except Exception as e:
+            logger.warning(f"Could not get cached data: {e}")
+            return None
     
     def find_nearest_stations(
         self, 
-        user_lat: float = None, 
-        user_lng: float = None, 
         min_batteries: int = 1,
         limit: int = 5
     ) -> dict:
         """
-        Find the nearest stations to the user's location.
+        Find the nearest and best stations using cached frontend data.
+        
+        - Nearest = Station with smallest distance (km)
+        - Best = Station with smallest ETA (traffic-aware)
         
         Args:
-            user_lat: User's latitude (uses default if None)
-            user_lng: User's longitude (uses default if None)
             min_batteries: Minimum batteries required (for availability filter)
             limit: Maximum number of stations to return
         
         Returns:
             dict with:
                 - speech: Hindi TTS response
-                - stations: List of nearby stations with distance
-                - best_station: The recommended station
+                - stations: List of nearby stations with distance/ETA
+                - nearest_station: Station with smallest distance
+                - best_station: Station with smallest ETA
                 - total_nearby: Total count of nearby stations
         """
-        # Use default location if not provided
-        if user_lat is None:
-            user_lat = self.default_location["lat"]
-        if user_lng is None:
-            user_lng = self.default_location["lng"]
+        # Get cached data from frontend
+        cached = self._get_cached_data()
         
-        logger.info(f"📍 Finding stations near: {user_lat}, {user_lng}")
+        if not cached or not cached.get("data"):
+            logger.warning("📍 No cached station data from frontend!")
+            return {
+                "speech": "Maaf kijiye, station ka data abhi load nahi hua hai. Kripya thodi der baad try karein.",
+                "stations": [],
+                "nearest_station": None,
+                "best_station": None,
+                "total_nearby": 0,
+                "has_eta_data": False,
+                "error": "no_cached_data"
+            }
         
-        # Calculate distance for each station
-        stations_with_distance = []
-        for station in self.stations:
-            distance = haversine_distance(
-                user_lat, user_lng,
-                station["lat"], station["lng"]
-            )
-            stations_with_distance.append({
-                **station,
-                "distance_km": round(distance, 2)
+        logger.info("📍 Using cached station data from frontend")
+        
+        stations = cached.get("data", [])
+        user_location = cached.get("user_location", {})
+        
+        # Convert to our format
+        stations_formatted = []
+        for s in stations:
+            stations_formatted.append({
+                "id": s["id"],
+                "name": s["name"],
+                "lat": s["lat"],
+                "lng": s["lng"],
+                "batteries": s.get("batteries", 0),
+                "distance_km": round(s.get("distance", 0), 2),
+                "eta_minutes": round(s.get("duration", 0), 1) if s.get("duration") else None,
+                "has_eta": s.get("duration") is not None
             })
         
-        # Sort by distance
-        stations_with_distance.sort(key=lambda x: x["distance_km"])
+        # Sort by distance for nearest
+        stations_by_distance = sorted(stations_formatted, key=lambda x: x["distance_km"])
+        nearest_station = stations_by_distance[0] if stations_by_distance else None
         
-        # Filter by availability
-        available_stations = [
-            s for s in stations_with_distance 
+        # Sort by ETA for best (only stations with batteries and valid ETA)
+        available_with_eta = [
+            s for s in stations_formatted 
+            if s["batteries"] >= min_batteries and s.get("eta_minutes") is not None
+        ]
+        available_by_distance = [
+            s for s in stations_by_distance 
             if s["batteries"] >= min_batteries
         ]
         
-        # Get top N stations
-        nearby_stations = stations_with_distance[:limit]
-        total_count = len(stations_with_distance)
+        if available_with_eta:
+            # Best = lowest ETA among stations with batteries
+            best_station = sorted(available_with_eta, key=lambda x: x["eta_minutes"])[0]
+        elif available_by_distance:
+            # Fallback: nearest with batteries
+            best_station = available_by_distance[0]
+        else:
+            best_station = None
         
-        # Find best station (nearest with batteries)
-        best_station = None
-        nearest_station = stations_with_distance[0] if stations_with_distance else None
-        
-        if available_stations:
-            best_station = available_stations[0]
+        total_count = len(stations_formatted)
+        nearby_stations = stations_by_distance[:limit]
         
         # Generate speech response
         speech = self._generate_speech(
@@ -126,12 +125,14 @@ class NearestStationTool:
         result = {
             "speech": speech,
             "stations": nearby_stations,
+            "nearest_station": nearest_station,
             "best_station": best_station,
             "total_nearby": total_count,
-            "user_location": {"lat": user_lat, "lng": user_lng}
+            "user_location": user_location,
+            "has_eta_data": True
         }
         
-        logger.info(f"🔋 Found {total_count} stations, best: {best_station['name'] if best_station else 'None'}")
+        logger.info(f"🔋 Found {total_count} stations. Nearest: {nearest_station['name'] if nearest_station else 'None'}, Best (by ETA): {best_station['name'] if best_station else 'None'}")
         
         return result
     
@@ -142,56 +143,74 @@ class NearestStationTool:
         best_station: dict,
         min_batteries: int
     ) -> str:
-        """
-        Generate Hindi TTS response based on station data.
-        """
+        """Generate Hindi TTS response with ETA information."""
         if not nearest_station:
             return "Maaf kijiye, aapke aas-paas koi station nahi mila."
         
-        # Scenario 1: Nearest station has batteries - recommend it
-        if best_station and nearest_station["id"] == best_station["id"]:
-            distance = best_station["distance_km"]
-            batteries = best_station["batteries"]
-            name = best_station["name"].split(" - ")[-1] if " - " in best_station["name"] else best_station["name"]
-            
-            return (
-                f"Main dekh rahi hu ki aapke paas {total_count} station hain. "
-                f"Sabse nazdeeki {name} hai jo sirf {distance} kilometer door hai "
-                f"aur wahan {batteries} battery available hain. "
-                f"Kya aapko directions chahiye?"
-            )
+        def get_short_name(name):
+            return name.split(" - ")[-1] if " - " in name else name
         
-        # Scenario 2: Nearest station is empty, recommend next available one
+        nearest_name = get_short_name(nearest_station["name"])
+        nearest_distance = nearest_station["distance_km"]
+        
+        # If best station exists and has ETA
+        if best_station and best_station.get("eta_minutes"):
+            best_name = get_short_name(best_station["name"])
+            best_eta = int(best_station["eta_minutes"])
+            best_batteries = best_station["batteries"]
+            
+            # If nearest and best are the same
+            if nearest_station["id"] == best_station["id"]:
+                return (
+                    f"Main dekh rahi hu ki aapke paas {total_count} station hain. "
+                    f"Sabse nazdeeki aur best option {best_name} hai "
+                    f"jo sirf {best_eta} minute door hai "
+                    f"aur wahan {best_batteries} battery available hain. "
+                    f"Kya aapko directions chahiye?"
+                )
+            else:
+                # Nearest and best are different
+                nearest_eta = int(nearest_station["eta_minutes"]) if nearest_station.get("eta_minutes") else None
+                if nearest_eta:
+                    return (
+                        f"Aapke sabse paas waala station {nearest_name} hai jo {nearest_eta} minute door hai, "
+                        f"lekin traffic ke hisaab se best option {best_name} hai "
+                        f"jo {best_eta} minute mein pahunch sakte hain "
+                        f"aur wahan {best_batteries} battery available hain."
+                    )
+                else:
+                    return (
+                        f"Sabse nazdeeki station {nearest_name} hai jo {nearest_distance} km door hai. "
+                        f"Lekin best option {best_name} hai "
+                        f"jo {best_eta} minute mein pahunch sakte hain "
+                        f"aur wahan {best_batteries} battery available hain."
+                    )
+        
+        # Best station exists but no ETA
         elif best_station:
-            nearest_name = nearest_station["name"].split(" - ")[-1] if " - " in nearest_station["name"] else nearest_station["name"]
-            best_name = best_station["name"].split(" - ")[-1] if " - " in best_station["name"] else best_station["name"]
-            distance = best_station["distance_km"]
-            batteries = best_station["batteries"]
+            best_name = get_short_name(best_station["name"])
+            best_distance = best_station["distance_km"]
+            best_batteries = best_station["batteries"]
             
             return (
-                f"Aapke sabse paas waale {nearest_name} station pe "
-                f"abhi battery available nahi hai. "
-                f"Main aapko dusre station {best_name} ka raasta bata sakti hu "
-                f"jo {distance} kilometer door hai aur wahan {batteries} battery available hain."
+                f"Aapke paas {total_count} station hain. "
+                f"Best option {best_name} hai jo {best_distance} km door hai "
+                f"aur wahan {best_batteries} battery available hain."
             )
         
-        # Scenario 3: No stations with batteries
+        # No stations with batteries
         else:
             return (
                 f"Maaf kijiye, abhi aas-paas ke {total_count} stations mein se "
                 f"kisi mein bhi battery available nahi hai. Kripya thodi der baad try karein."
             )
     
-    def get_station_by_id(self, station_id: int) -> dict | None:
-        """Get a specific station by ID."""
-        for station in self.stations:
-            if station["id"] == station_id:
-                return station
-        return None
-    
     def get_all_stations(self) -> list:
-        """Get all stations."""
-        return self.stations
+        """Get all stations from cached data."""
+        cached = self._get_cached_data()
+        if cached:
+            return cached.get("data", [])
+        return []
 
 
 # Singleton instance
