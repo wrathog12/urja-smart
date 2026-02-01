@@ -26,7 +26,7 @@ class GroqLLM:
             completion = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.6,
+                temperature=0.3,
                 max_tokens=200,  # Slightly more for sentiment
                 stop=None
             )
