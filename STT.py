@@ -13,7 +13,7 @@ from deepgram import (
 # CONFIGURATION
 # ------------------------------------------------------------------
 # Replace with your key or use os.getenv("DEEPGRAM_API_KEY")
-API_KEY = "2185f293a20092b424619d78c960db61ca615f46" 
+API_KEY = "" 
 STREAM_URL = "http://stream.live.vc.bbcmedia.co.uk/bbc_world_service"
 MODEL = "nova-3"
 # ------------------------------------------------------------------

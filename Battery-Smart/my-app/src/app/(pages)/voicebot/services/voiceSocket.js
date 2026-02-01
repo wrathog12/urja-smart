@@ -240,6 +240,12 @@ export class VoiceSocketService {
    */
   handleDataChannelMessage(message) {
     console.log("📨 Data channel message:", message);
+    console.log(
+      "📨 Message type:",
+      message?.type,
+      "Message data:",
+      message?.data,
+    );
 
     switch (message.type) {
       case "log":
@@ -264,6 +270,9 @@ export class VoiceSocketService {
 
       case "fetch_output":
         // AdditionalOutputs from FastRTC
+        console.log(
+          "📨 fetch_output received, calling handleAdditionalOutputs",
+        );
         this.handleAdditionalOutputs(message.data);
         break;
 
@@ -277,6 +286,9 @@ export class VoiceSocketService {
       case "warning":
         console.warn("FastRTC warning:", message.data);
         break;
+
+      default:
+        console.log("📨 Unhandled message type:", message.type);
     }
   }
 
@@ -285,6 +297,7 @@ export class VoiceSocketService {
    */
   handleAdditionalOutputs(data) {
     console.log("📨 handleAdditionalOutputs received:", data);
+    console.log("📨 Data type:", typeof data, "Is Array:", Array.isArray(data));
 
     // data is an array: [userText, botResponse, toolData, latency]
     if (Array.isArray(data) && data.length >= 4) {
@@ -292,7 +305,7 @@ export class VoiceSocketService {
 
       console.log("📝 Parsed - userText:", userText?.substring(0, 50));
       console.log("🤖 Parsed - botResponse:", botResponse?.substring(0, 50));
-      console.log("🔧 Parsed - toolData:", toolData);
+      console.log("🔧 Parsed - toolData:", toolData, "Type:", typeof toolData);
 
       if (userText && this.onTranscriptCallback) {
         this.onTranscriptCallback(userText.replace(/^🗣️\s*/, ""));
@@ -302,12 +315,19 @@ export class VoiceSocketService {
         this.onBotResponseCallback(botResponse.replace(/^🤖\s*/, ""));
       }
 
+      // Log callback registration status
+      console.log(
+        "🔧 onToolActivationCallback registered:",
+        !!this.onToolActivationCallback,
+      );
+
       if (toolData && toolData !== "None" && this.onToolActivationCallback) {
         console.log("🔧 Tool data found, attempting to parse...");
         try {
           const tool =
             typeof toolData === "string" ? JSON.parse(toolData) : toolData;
           console.log("🔧 Parsed tool:", tool);
+          console.log("🔧 Tool name:", tool?.name);
           this.onToolActivationCallback(tool);
 
           // Check for end_call tool
@@ -326,7 +346,18 @@ export class VoiceSocketService {
         } catch (e) {
           console.error("❌ Failed to parse tool JSON:", e, "Raw:", toolData);
         }
+      } else {
+        console.log(
+          "🔧 Tool data skipped - toolData:",
+          toolData,
+          "isNone:",
+          toolData === "None",
+          "hasCallback:",
+          !!this.onToolActivationCallback,
+        );
       }
+    } else {
+      console.log("📨 Data format unexpected - not an array with 4+ elements");
     }
   }
 
@@ -336,6 +367,7 @@ export class VoiceSocketService {
   startStatePolling() {
     if (this.statePollingInterval) return;
     this.escalationTriggered = false; // Track if we've already triggered escalation
+    this.showDirectionsTriggered = false; // Track if we've already triggered show_directions
 
     // Add a delay before starting to poll to ensure session reset completes
     setTimeout(() => {
@@ -349,7 +381,20 @@ export class VoiceSocketService {
             is_active: state.is_active,
             should_end: state.should_end,
             end_reason: state.end_reason,
+            last_tool: state.last_tool,
           });
+
+          // Check for show_directions tool via polling (fallback)
+          if (
+            state.last_tool?.name === "show_directions" &&
+            !this.showDirectionsTriggered
+          ) {
+            console.log("🗺️ SHOW DIRECTIONS DETECTED via polling!");
+            this.showDirectionsTriggered = true;
+            if (this.onToolActivationCallback) {
+              this.onToolActivationCallback(state.last_tool);
+            }
+          }
 
           // Handle call end from backend - ONLY if session is active
           // This prevents false triggers from stale state

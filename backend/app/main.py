@@ -9,6 +9,7 @@ import gradio as gr
 # Import the configured stream from voice_stream pipeline
 from backend.app.pipelines.voice_stream import voice_stream, session_state, reset_session, get_conversation_history
 from backend.app.services.tts import tts_service
+from backend.app.api.station_data import router as station_router
 
 # --- Pydantic Models ---
 class VoicePersonaRequest(BaseModel):
@@ -32,6 +33,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Include Station Data Router ---
+app.include_router(station_router)
 
 # --- Health Check Endpoint ---
 @app.get("/health")
