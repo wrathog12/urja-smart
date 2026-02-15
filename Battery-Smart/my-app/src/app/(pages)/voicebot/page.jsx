@@ -122,7 +122,7 @@ export default function HomePage() {
         setTimeout(() => {
           console.log("🗺️ Redirecting to /maps");
           router.push("/maps");
-        }, 1500);
+        }, 2500);
       }
     });
 
