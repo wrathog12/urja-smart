@@ -193,6 +193,7 @@ Built with ❤️ by **Team BotGods**
 | **Abhishek Choudhary** | AI Pipeline & Backend Architecture |
 | **Saksham Bassi** | Business Logic & Product Strategy |
 | **Ankit Singh Lingwal** | System Integration & Frontend |
+| **Akshat Saraswat** | Star Performer |
 
 ---
 
@@ -209,3 +210,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 *Powering India's gig economy, one voice at a time.*
 
 </div>
+
