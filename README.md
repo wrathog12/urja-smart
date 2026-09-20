@@ -14,7 +14,7 @@
 
 ---
 
-**Urja** is a **Real-Time, Bi-Directional Voice AI Agent** designed specifically for the gig-economy drivers of India. It understands **Hinglish (Hindi + English)**, handles complex logistical queries (invoices, station locations), and proactively pitches revenue-saving schemes—all with **sub-second latency**.
+**Urja** is a **Real-Time, Bi-Directional Voice AI Agent** designed specifically for the gig-economy drivers of India. It understands **Hinglish (Hindi + English)**, handles complex logistical queries (invoices, station locations), and proactively pitches revenue-saving schemes—all with **sub-second latencys**.
 
 ---
 
